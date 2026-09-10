@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { supabase } from './lib/supabase'
 import './App.css'
+
+const LOCATION_SYNC_INTERVAL_MS = 8000
 
 type Driver = {
   id: string
@@ -20,7 +23,28 @@ type LocationData = {
   timestamp: number
 }
 
+type NativePosition = {
+  coords: {
+    latitude: number
+    longitude: number
+    accuracy: number
+    speed: number | null
+    heading: number | null
+  }
+  timestamp: number
+}
+
+function formatTime(timestamp: number | null) {
+  if (!timestamp) return '—'
+
+  return new Date(timestamp).toLocaleTimeString('pt-BR')
+}
+
 function App() {
+  // =========================================================
+  // AUTH
+  // =========================================================
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -31,12 +55,34 @@ function App() {
   const [driver, setDriver] = useState<Driver | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
 
+  // =========================================================
+  // GPS
+  // =========================================================
+
   const [location, setLocation] = useState<LocationData | null>(null)
+
   const [tracking, setTracking] = useState(false)
+  const [gpsBusy, setGpsBusy] = useState(false)
+
   const [gpsStatus, setGpsStatus] = useState('GPS parado')
   const [gpsError, setGpsError] = useState<string | null>(null)
 
   const watchId = useRef<string | null>(null)
+
+  // =========================================================
+  // SINCRONIZAÇÃO COM SUPABASE
+  // =========================================================
+
+  const [syncStatus, setSyncStatus] = useState('Aguardando GPS')
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
+
+  const lastLocationAttemptAt = useRef(0)
+  const locationSyncInFlight = useRef(false)
+
+  // =========================================================
+  // CARREGAR ENTREGADOR
+  // =========================================================
 
   async function loadDriver() {
     const {
@@ -87,6 +133,10 @@ function App() {
     setDriver(driverData)
   }
 
+  // =========================================================
+  // RESTAURAR SESSÃO
+  // =========================================================
+
   useEffect(() => {
     let mounted = true
 
@@ -104,18 +154,23 @@ function App() {
         }
 
         if (session) {
-          setAuthenticated(true)
           await loadDriver()
+
+          if (mounted) {
+            setAuthenticated(true)
+          }
         }
       } catch (error) {
         if (!mounted) return
 
         const message =
-          error instanceof Error
-            ? error.message
+          error && typeof error === 'object' && 'message' in error
+            ? String(error.message)
             : 'Não foi possível restaurar a sessão.'
 
         setAuthError(message)
+        setAuthenticated(false)
+        setDriver(null)
       } finally {
         if (mounted) {
           setLoadingSession(false)
@@ -135,6 +190,10 @@ function App() {
       }
     }
   }, [])
+
+  // =========================================================
+  // LOGIN
+  // =========================================================
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -160,11 +219,11 @@ function App() {
       await supabase.auth.signOut()
 
       const message =
-  error && typeof error === 'object' && 'message' in error
-    ? String(error.message)
-    : String(error)
+        error && typeof error === 'object' && 'message' in error
+          ? String(error.message)
+          : 'Não foi possível entrar.'
 
-console.error('ERRO_LOGIN:', error)
+      console.error('ERRO_LOGIN:', error)
 
       setAuthError(message)
       setAuthenticated(false)
@@ -174,16 +233,116 @@ console.error('ERRO_LOGIN:', error)
     }
   }
 
-  function savePosition(position: {
-    coords: {
-      latitude: number
-      longitude: number
-      accuracy: number
-      speed: number | null
-      heading: number | null
+  // =========================================================
+  // ENVIAR GPS PARA O SUPABASE
+  // =========================================================
+
+  async function sendLocationToSupabase(position: NativePosition) {
+    const now = Date.now()
+
+    // Impede excesso de escrita no Supabase.
+    if (
+      now - lastLocationAttemptAt.current < LOCATION_SYNC_INTERVAL_MS ||
+      locationSyncInFlight.current
+    ) {
+      return
     }
-    timestamp: number
-  }) {
+
+    // Marcamos a tentativa antes da chamada.
+    // Assim um erro de rede também não gera dezenas de tentativas por segundo.
+    lastLocationAttemptAt.current = now
+    locationSyncInFlight.current = true
+
+    try {
+      setSyncError(null)
+      setSyncStatus('Enviando localização...')
+
+      const latitude = position.coords.latitude
+      const longitude = position.coords.longitude
+
+      if (
+        !Number.isFinite(latitude) ||
+        latitude < -90 ||
+        latitude > 90
+      ) {
+        throw new Error('Latitude inválida recebida pelo GPS.')
+      }
+
+      if (
+        !Number.isFinite(longitude) ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        throw new Error('Longitude inválida recebida pelo GPS.')
+      }
+
+      const accuracy =
+        Number.isFinite(position.coords.accuracy) &&
+        position.coords.accuracy >= 0
+          ? position.coords.accuracy
+          : null
+
+      const speed =
+        position.coords.speed != null &&
+        Number.isFinite(position.coords.speed) &&
+        position.coords.speed >= 0
+          ? position.coords.speed
+          : null
+
+      const heading =
+        position.coords.heading != null &&
+        Number.isFinite(position.coords.heading) &&
+        position.coords.heading >= 0 &&
+        position.coords.heading < 360
+          ? position.coords.heading
+          : null
+
+      const { data, error } = await supabase.rpc(
+        'update_my_driver_location',
+        {
+          _latitude: latitude,
+          _longitude: longitude,
+          _accuracy_m: accuracy,
+          _speed_mps: speed,
+          _heading_deg: heading,
+        },
+      )
+
+      if (error) {
+        throw error
+      }
+
+      const syncedTimestamp = data
+        ? new Date(data).getTime()
+        : Date.now()
+
+      setLastSyncedAt(
+        Number.isFinite(syncedTimestamp)
+          ? syncedTimestamp
+          : Date.now(),
+      )
+
+      setSyncStatus('Localização sincronizada')
+    } catch (error) {
+      const message =
+        error && typeof error === 'object' && 'message' in error
+          ? String(error.message)
+          : 'Falha ao enviar localização.'
+
+      console.error('ERRO_SYNC_GPS:', error)
+
+      setSyncError(message)
+      setSyncStatus('Falha na sincronização')
+    } finally {
+      locationSyncInFlight.current = false
+    }
+  }
+
+  // =========================================================
+  // RECEBER NOVA POSIÇÃO
+  // =========================================================
+
+  function savePosition(position: NativePosition) {
     setLocation({
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
@@ -192,11 +351,30 @@ console.error('ERRO_LOGIN:', error)
       heading: position.coords.heading,
       timestamp: position.timestamp,
     })
+
+    void sendLocationToSupabase(position)
   }
 
+  // =========================================================
+  // INICIAR GPS
+  // =========================================================
+
   async function startGps() {
+    if (gpsBusy || tracking) return
+
     try {
+      setGpsBusy(true)
       setGpsError(null)
+      setSyncError(null)
+
+      // No momento estamos usando o plugin nativo.
+      // Evita aquela mensagem "Not implemented on web" no localhost.
+      if (!Capacitor.isNativePlatform()) {
+        throw new Error(
+          'O teste de GPS deve ser feito no app Android/BlueStacks.',
+        )
+      }
+
       setGpsStatus('Solicitando permissão...')
 
       const permissions = await Geolocation.checkPermissions()
@@ -221,6 +399,15 @@ console.error('ERRO_LOGIN:', error)
 
       savePosition(currentPosition)
 
+      // Proteção caso exista um watch antigo por algum motivo.
+      if (watchId.current) {
+        await Geolocation.clearWatch({
+          id: watchId.current,
+        })
+
+        watchId.current = null
+      }
+
       watchId.current = await Geolocation.watchPosition(
         {
           enableHighAccuracy: true,
@@ -244,28 +431,53 @@ console.error('ERRO_LOGIN:', error)
       setGpsStatus('GPS ativo')
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
+        error && typeof error === 'object' && 'message' in error
+          ? String(error.message)
           : 'Não foi possível iniciar o GPS.'
+
+      console.error('ERRO_GPS:', error)
 
       setGpsError(message)
       setGpsStatus('Erro no GPS')
       setTracking(false)
+    } finally {
+      setGpsBusy(false)
     }
   }
+
+  // =========================================================
+  // PARAR GPS
+  // =========================================================
 
   async function stopGps() {
-    if (watchId.current) {
-      await Geolocation.clearWatch({
-        id: watchId.current,
-      })
+    if (gpsBusy) return
 
-      watchId.current = null
+    try {
+      setGpsBusy(true)
+
+      if (watchId.current) {
+        await Geolocation.clearWatch({
+          id: watchId.current,
+        })
+
+        watchId.current = null
+      }
+
+      setTracking(false)
+      setGpsStatus('GPS parado')
+      setSyncStatus('Sincronização pausada')
+    } catch (error) {
+      console.error('ERRO_PARAR_GPS:', error)
+
+      setGpsError('Não foi possível parar o GPS corretamente.')
+    } finally {
+      setGpsBusy(false)
     }
-
-    setTracking(false)
-    setGpsStatus('GPS parado')
   }
+
+  // =========================================================
+  // LOGOUT
+  // =========================================================
 
   async function handleLogout() {
     await stopGps()
@@ -274,10 +486,25 @@ console.error('ERRO_LOGIN:', error)
     setAuthenticated(false)
     setDriver(null)
     setLocation(null)
+
     setEmail('')
     setPassword('')
+
     setAuthError(null)
+    setGpsError(null)
+    setSyncError(null)
+
+    setGpsStatus('GPS parado')
+    setSyncStatus('Aguardando GPS')
+
+    setLastSyncedAt(null)
+
+    lastLocationAttemptAt.current = 0
   }
+
+  // =========================================================
+  // LOADING
+  // =========================================================
 
   if (loadingSession) {
     return (
@@ -289,6 +516,10 @@ console.error('ERRO_LOGIN:', error)
       </main>
     )
   }
+
+  // =========================================================
+  // LOGIN
+  // =========================================================
 
   if (!authenticated || !driver) {
     return (
@@ -302,7 +533,11 @@ console.error('ERRO_LOGIN:', error)
             Acesse sua conta de entregador.
           </p>
 
-          {authError && <div className="error">{authError}</div>}
+          {authError && (
+            <div className="error">
+              {authError}
+            </div>
+          )}
 
           <form onSubmit={handleLogin}>
             <label>
@@ -313,6 +548,7 @@ console.error('ERRO_LOGIN:', error)
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 autoComplete="email"
+                inputMode="email"
                 required
               />
             </label>
@@ -329,7 +565,10 @@ console.error('ERRO_LOGIN:', error)
               />
             </label>
 
-            <button type="submit" disabled={loginLoading}>
+            <button
+              type="submit"
+              disabled={loginLoading}
+            >
               {loginLoading ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
@@ -338,19 +577,31 @@ console.error('ERRO_LOGIN:', error)
     )
   }
 
+  // =========================================================
+  // APP DO ENTREGADOR
+  // =========================================================
+
   return (
     <main className="app">
       <section className="card">
         <div className="driver-header">
           <div>
-            <p className="eyebrow">ROTAZRO ENTREGADOR</p>
+            <p className="eyebrow">
+              ROTAZRO ENTREGADOR
+            </p>
 
             <h1>{driver.name}</h1>
 
-            <p className="description">Entregador conectado</p>
+            <p className="description">
+              Entregador conectado
+            </p>
           </div>
 
-          <button className="logout" onClick={handleLogout}>
+          <button
+            className="logout"
+            onClick={handleLogout}
+            disabled={gpsBusy}
+          >
             Sair
           </button>
         </div>
@@ -360,28 +611,42 @@ console.error('ERRO_LOGIN:', error)
           {gpsStatus}
         </div>
 
-        {gpsError && <div className="error">{gpsError}</div>}
+        {gpsError && (
+          <div className="error">
+            {gpsError}
+          </div>
+        )}
 
         <div className="location-grid">
           <div>
             <small>Latitude</small>
-            <strong>{location?.latitude.toFixed(6) ?? '—'}</strong>
+
+            <strong>
+              {location?.latitude.toFixed(6) ?? '—'}
+            </strong>
           </div>
 
           <div>
             <small>Longitude</small>
-            <strong>{location?.longitude.toFixed(6) ?? '—'}</strong>
+
+            <strong>
+              {location?.longitude.toFixed(6) ?? '—'}
+            </strong>
           </div>
 
           <div>
             <small>Precisão</small>
+
             <strong>
-              {location ? `${location.accuracy.toFixed(1)} m` : '—'}
+              {location
+                ? `${location.accuracy.toFixed(1)} m`
+                : '—'}
             </strong>
           </div>
 
           <div>
             <small>Velocidade</small>
+
             <strong>
               {location?.speed != null
                 ? `${(location.speed * 3.6).toFixed(1)} km/h`
@@ -391,17 +656,41 @@ console.error('ERRO_LOGIN:', error)
         </div>
 
         <div className="updated">
-          Última atualização:{' '}
-          {location
-            ? new Date(location.timestamp).toLocaleTimeString('pt-BR')
-            : '—'}
+          Última leitura do GPS:{' '}
+          {formatTime(location?.timestamp ?? null)}
+        </div>
+
+        <div className="sync-info">
+          <strong>
+            {syncStatus}
+          </strong>
+
+          <span>
+            Último envio ao RotazRO:{' '}
+            {formatTime(lastSyncedAt)}
+          </span>
+
+          {syncError && (
+            <span className="sync-error">
+              {syncError}
+            </span>
+          )}
         </div>
 
         {!tracking ? (
-          <button onClick={startGps}>Iniciar GPS</button>
+          <button
+            onClick={startGps}
+            disabled={gpsBusy}
+          >
+            {gpsBusy ? 'Iniciando...' : 'Iniciar GPS'}
+          </button>
         ) : (
-          <button className="secondary" onClick={stopGps}>
-            Parar GPS
+          <button
+            className="secondary"
+            onClick={stopGps}
+            disabled={gpsBusy}
+          >
+            {gpsBusy ? 'Parando...' : 'Parar GPS'}
           </button>
         )}
       </section>
