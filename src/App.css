@@ -53,6 +53,42 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+
+  /*
+   * Evita efeitos visuais de toque/seleção indesejados
+   * no WebView Android.
+   */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* =========================================================
+   SELEÇÃO DE TEXTO / TOUCH
+   ========================================================= */
+
+/*
+ * O app não precisa permitir seleção de texto na interface operacional.
+ *
+ * Isso evita o menu padrão do Android:
+ * "Copiar / Selecionar tudo / Compartilhar"
+ *
+ * que estava aparecendo ao abrir o app pela notificação.
+ */
+.app,
+.app * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/*
+ * Campos de formulário continuam editáveis/selecionáveis normalmente.
+ */
+.app input,
+.app textarea,
+.app select {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 /* =========================================================
@@ -70,6 +106,11 @@ body {
     max(24px, env(safe-area-inset-bottom))
     max(20px, env(safe-area-inset-left));
   background: var(--bg);
+
+  /*
+   * Melhora o comportamento do app instalado em telas touch.
+   */
+  touch-action: manipulation;
 }
 
 .card {
@@ -223,6 +264,22 @@ h1 {
   text-overflow: ellipsis;
 }
 
+/*
+ * Reforço específico:
+ * coordenadas e informações operacionais não devem ativar seleção.
+ */
+.location-grid,
+.location-grid *,
+.updated,
+.sync-info,
+.sync-info *,
+.status,
+.status * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .updated {
   margin: 18px 0 12px;
   color: var(--text-muted);
@@ -306,6 +363,14 @@ input {
     border-color 160ms ease,
     box-shadow 160ms ease,
     background-color 160ms ease;
+
+  /*
+   * Inputs precisam continuar permitindo cursor,
+   * seleção e edição normal.
+   */
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 input:hover {
@@ -335,6 +400,9 @@ button {
   font-weight: 700;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
   transition:
     transform 100ms ease,
     background-color 160ms ease,

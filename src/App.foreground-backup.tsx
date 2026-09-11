@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
-import { BackgroundGeolocation } from '@capgo/background-geolocation'
 import { supabase } from './lib/supabase'
 import './App.css'
 
@@ -33,15 +32,6 @@ type NativePosition = {
     heading: number | null
   }
   timestamp: number
-}
-
-type BackgroundPosition = {
-  latitude: number
-  longitude: number
-  accuracy: number
-  speed: number | null
-  bearing: number | null
-  time: number | null
 }
 
 function formatTime(timestamp: number | null) {
@@ -77,7 +67,7 @@ function App() {
   const [gpsStatus, setGpsStatus] = useState('GPS parado')
   const [gpsError, setGpsError] = useState<string | null>(null)
 
-  const backgroundTrackingStarted = useRef(false)
+  const watchId = useRef<string | null>(null)
 
   // =========================================================
   // SINCRONIZAÇÃO COM SUPABASE
@@ -193,16 +183,11 @@ function App() {
     return () => {
       mounted = false
 
-      /*
-       * IMPORTANTE:
-       * Não paramos BackgroundGeolocation aqui.
-       *
-       * Um unmount/recarregamento da WebView não deve, por si só,
-       * significar que o entregador decidiu encerrar o rastreamento.
-       *
-       * O GPS só deve ser encerrado explicitamente por stopGps()
-       * ou logout.
-       */
+      if (watchId.current) {
+        void Geolocation.clearWatch({
+          id: watchId.current,
+        })
+      }
     }
   }, [])
 
@@ -263,12 +248,8 @@ function App() {
       return
     }
 
-    /*
-     * Marcamos a tentativa antes da chamada.
-     *
-     * Assim, mesmo se houver erro de rede, não fazemos dezenas
-     * de tentativas consecutivas por segundo.
-     */
+    // Marcamos a tentativa antes da chamada.
+    // Assim um erro de rede também não gera dezenas de tentativas por segundo.
     lastLocationAttemptAt.current = now
     locationSyncInFlight.current = true
 
@@ -358,7 +339,7 @@ function App() {
   }
 
   // =========================================================
-  // SALVAR POSIÇÃO
+  // RECEBER NOVA POSIÇÃO
   // =========================================================
 
   function savePosition(position: NativePosition) {
@@ -375,62 +356,27 @@ function App() {
   }
 
   // =========================================================
-  // CONVERTER POSIÇÃO DO BACKGROUND GEOLOCATION
-  // =========================================================
-
-  function saveBackgroundPosition(position: BackgroundPosition) {
-    const normalizedPosition: NativePosition = {
-      coords: {
-        latitude: position.latitude,
-        longitude: position.longitude,
-        accuracy: position.accuracy,
-        speed: position.speed,
-        heading: position.bearing,
-      },
-      timestamp: position.time ?? Date.now(),
-    }
-
-    savePosition(normalizedPosition)
-  }
-
-  // =========================================================
   // INICIAR GPS
   // =========================================================
 
   async function startGps() {
-    if (
-      gpsBusy ||
-      tracking ||
-      backgroundTrackingStarted.current
-    ) {
-      return
-    }
+    if (gpsBusy || tracking) return
 
     try {
       setGpsBusy(true)
       setGpsError(null)
       setSyncError(null)
 
+      // No momento estamos usando o plugin nativo.
+      // Evita aquela mensagem "Not implemented on web" no localhost.
       if (!Capacitor.isNativePlatform()) {
         throw new Error(
           'O teste de GPS deve ser feito no app Android/BlueStacks.',
         )
       }
 
-      /*
-       * Garante que a primeira posição desta nova sessão possa ser
-       * enviada imediatamente ao Supabase.
-       */
-      lastLocationAttemptAt.current = 0
-
       setGpsStatus('Solicitando permissão...')
 
-      /*
-       * Continuamos usando @capacitor/geolocation para obter
-       * a primeira posição imediatamente.
-       *
-       * O BackgroundGeolocation assumirá o rastreamento contínuo.
-       */
       const permissions = await Geolocation.checkPermissions()
 
       if (permissions.location !== 'granted') {
@@ -439,116 +385,50 @@ function App() {
         })
 
         if (requested.location !== 'granted') {
-          throw new Error(
-            'Permissão de localização não concedida.',
-          )
+          throw new Error('Permissão de localização não concedida.')
         }
       }
 
       setGpsStatus('Obtendo localização...')
 
-      const currentPosition =
-        await Geolocation.getCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 0,
-        })
+      const currentPosition = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      })
 
       savePosition(currentPosition)
 
-      /*
-       * Proteção contra uma sessão antiga do serviço nativo.
-       *
-       * Para nossos primeiros testes, preferimos garantir que exista
-       * somente um rastreamento ativo antes de iniciar outro.
-       */
-      try {
-        await BackgroundGeolocation.stop()
-      } catch (error) {
-        console.warn(
-          'BACKGROUND_GPS_STOP_PREVIOUS:',
-          error,
-        )
+      // Proteção caso exista um watch antigo por algum motivo.
+      if (watchId.current) {
+        await Geolocation.clearWatch({
+          id: watchId.current,
+        })
+
+        watchId.current = null
       }
 
-      setGpsStatus('Iniciando rastreamento...')
-
-      await BackgroundGeolocation.start(
+      watchId.current = await Geolocation.watchPosition(
         {
-          /*
-           * A presença de backgroundMessage instrui o plugin a
-           * continuar entregando posições quando o aplicativo vai
-           * para segundo plano.
-           *
-           * No Android também cria a notificação persistente.
-           */
-          backgroundTitle: 'RotazRO Entregador',
-          backgroundMessage:
-            'Sua localização está ativa enquanto você realiza entregas.',
-
-          /*
-           * O plugin também poderá solicitar permissões nativas
-           * adicionais necessárias, incluindo notificação em Android
-           * moderno quando aplicável.
-           */
-          requestPermissions: true,
-
-          /*
-           * Não queremos coordenadas antigas durante nossos testes.
-           */
-          stale: false,
-
-          /*
-           * Zero significa que não exigimos um deslocamento mínimo
-           * antes de considerar uma atualização.
-           *
-           * Isso facilita o teste pelo BlueStacks.
-           */
-          distanceFilter: 0,
-
-          /*
-           * Intervalo desejado de aproximadamente 8 segundos.
-           *
-           * O próprio sendLocationToSupabase também mantém um
-           * throttle independente de 8 segundos.
-           */
-          minIntervalMs: LOCATION_SYNC_INTERVAL_MS,
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
         },
         (position, error) => {
           if (error) {
-            console.error(
-              'ERRO_BACKGROUND_GPS:',
-              error,
-            )
-
-            const message =
-              error.message ||
-              'Erro no rastreamento em segundo plano.'
-
-            setGpsError(message)
-
-            if (error.code === 'NOT_AUTHORIZED') {
-              setGpsStatus(
-                'Permissão de localização necessária',
-              )
-            }
-
+            setGpsError(error.message)
             return
           }
 
-          if (!position) {
-            return
+          if (position) {
+            savePosition(position)
+            setGpsStatus('GPS ativo')
           }
-
-          saveBackgroundPosition(position)
-          setGpsStatus('GPS ativo em segundo plano')
         },
       )
 
-      backgroundTrackingStarted.current = true
-
       setTracking(true)
-      setGpsStatus('GPS ativo em segundo plano')
+      setGpsStatus('GPS ativo')
     } catch (error) {
       const message =
         error && typeof error === 'object' && 'message' in error
@@ -556,21 +436,6 @@ function App() {
           : 'Não foi possível iniciar o GPS.'
 
       console.error('ERRO_GPS:', error)
-
-      /*
-       * Caso algo tenha falhado depois de iniciar parcialmente
-       * o serviço, tentamos limpar o estado nativo.
-       */
-      try {
-        await BackgroundGeolocation.stop()
-      } catch (stopError) {
-        console.warn(
-          'ERRO_LIMPEZA_BACKGROUND_GPS:',
-          stopError,
-        )
-      }
-
-      backgroundTrackingStarted.current = false
 
       setGpsError(message)
       setGpsStatus('Erro no GPS')
@@ -584,43 +449,27 @@ function App() {
   // PARAR GPS
   // =========================================================
 
-  async function stopGps(): Promise<boolean> {
-    if (gpsBusy) {
-      return false
-    }
+  async function stopGps() {
+    if (gpsBusy) return
 
     try {
       setGpsBusy(true)
-      setGpsError(null)
 
-      if (Capacitor.isNativePlatform()) {
-        await BackgroundGeolocation.stop()
+      if (watchId.current) {
+        await Geolocation.clearWatch({
+          id: watchId.current,
+        })
+
+        watchId.current = null
       }
-
-      backgroundTrackingStarted.current = false
 
       setTracking(false)
       setGpsStatus('GPS parado')
       setSyncStatus('Sincronização pausada')
-
-      return true
     } catch (error) {
       console.error('ERRO_PARAR_GPS:', error)
 
-      const message =
-        error && typeof error === 'object' && 'message' in error
-          ? String(error.message)
-          : 'Não foi possível parar o GPS corretamente.'
-
-      setGpsError(message)
-
-      /*
-       * Não marcamos o rastreamento como parado se a camada
-       * nativa informou falha ao encerrar.
-       */
-      setGpsStatus('Falha ao parar GPS')
-
-      return false
+      setGpsError('Não foi possível parar o GPS corretamente.')
     } finally {
       setGpsBusy(false)
     }
@@ -631,21 +480,7 @@ function App() {
   // =========================================================
 
   async function handleLogout() {
-    /*
-     * Primeiro desligamos o serviço de localização.
-     *
-     * Não queremos sair da conta enquanto o serviço nativo
-     * continua tentando sincronizar localização.
-     */
-    const gpsStopped = await stopGps()
-
-    if (!gpsStopped) {
-      setGpsError(
-        'Não foi possível encerrar o rastreamento. Tente novamente antes de sair.',
-      )
-      return
-    }
-
+    await stopGps()
     await supabase.auth.signOut()
 
     setAuthenticated(false)
@@ -665,8 +500,6 @@ function App() {
     setLastSyncedAt(null)
 
     lastLocationAttemptAt.current = 0
-    locationSyncInFlight.current = false
-    backgroundTrackingStarted.current = false
   }
 
   // =========================================================
@@ -678,7 +511,6 @@ function App() {
       <main className="app">
         <section className="card">
           <p className="eyebrow">ROTAZRO ENTREGADOR</p>
-
           <h1>Carregando...</h1>
         </section>
       </main>
@@ -693,9 +525,7 @@ function App() {
     return (
       <main className="app">
         <section className="card login-card">
-          <p className="eyebrow">
-            ROTAZRO ENTREGADOR
-          </p>
+          <p className="eyebrow">ROTAZRO ENTREGADOR</p>
 
           <h1>Entrar</h1>
 
@@ -716,9 +546,7 @@ function App() {
               <input
                 type="email"
                 value={email}
-                onChange={(event) =>
-                  setEmail(event.target.value)
-                }
+                onChange={(event) => setEmail(event.target.value)}
                 autoComplete="email"
                 inputMode="email"
                 required
@@ -731,9 +559,7 @@ function App() {
               <input
                 type="password"
                 value={password}
-                onChange={(event) =>
-                  setPassword(event.target.value)
-                }
+                onChange={(event) => setPassword(event.target.value)}
                 autoComplete="current-password"
                 required
               />
@@ -743,9 +569,7 @@ function App() {
               type="submit"
               disabled={loginLoading}
             >
-              {loginLoading
-                ? 'Entrando...'
-                : 'Entrar'}
+              {loginLoading ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
         </section>
@@ -775,22 +599,15 @@ function App() {
 
           <button
             className="logout"
-            onClick={() => {
-              void handleLogout()
-            }}
+            onClick={handleLogout}
             disabled={gpsBusy}
           >
             Sair
           </button>
         </div>
 
-        <div
-          className={`status ${
-            tracking ? 'active' : ''
-          }`}
-        >
+        <div className={`status ${tracking ? 'active' : ''}`}>
           <span />
-
           {gpsStatus}
         </div>
 
@@ -832,9 +649,7 @@ function App() {
 
             <strong>
               {location?.speed != null
-                ? `${(location.speed * 3.6).toFixed(
-                    1,
-                  )} km/h`
+                ? `${(location.speed * 3.6).toFixed(1)} km/h`
                 : '—'}
             </strong>
           </div>
@@ -842,9 +657,7 @@ function App() {
 
         <div className="updated">
           Última leitura do GPS:{' '}
-          {formatTime(
-            location?.timestamp ?? null,
-          )}
+          {formatTime(location?.timestamp ?? null)}
         </div>
 
         <div className="sync-info">
@@ -866,26 +679,18 @@ function App() {
 
         {!tracking ? (
           <button
-            onClick={() => {
-              void startGps()
-            }}
+            onClick={startGps}
             disabled={gpsBusy}
           >
-            {gpsBusy
-              ? 'Iniciando...'
-              : 'Iniciar GPS'}
+            {gpsBusy ? 'Iniciando...' : 'Iniciar GPS'}
           </button>
         ) : (
           <button
             className="secondary"
-            onClick={() => {
-              void stopGps()
-            }}
+            onClick={stopGps}
             disabled={gpsBusy}
           >
-            {gpsBusy
-              ? 'Parando...'
-              : 'Parar GPS'}
+            {gpsBusy ? 'Parando...' : 'Parar GPS'}
           </button>
         )}
       </section>
