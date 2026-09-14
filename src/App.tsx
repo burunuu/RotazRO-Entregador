@@ -4,6 +4,12 @@ import { Capacitor } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { BackgroundGeolocation } from '@capgo/background-geolocation'
 import { supabase } from './lib/supabase'
+import { ensureDriverProfile } from './services/driver-identity'
+import { updateMyPresence } from './services/presence'
+import { registerForPush, onNotificationOpened } from './services/notifications'
+import { useDeliveryOffers } from './hooks/useDeliveryOffers'
+import { DeliveryOfferModal } from './components/DeliveryOfferModal'
+import { MyRouteScreen } from './screens/MyRouteScreen'
 import './App.css'
 
 const LOCATION_SYNC_INTERVAL_MS = 8000
@@ -22,7 +28,7 @@ const VEHICLE_TYPES = [
   { value: 'van', label: 'Van' },
 ]
 
-type AppView = 'home' | 'profile' | 'history'
+type AppView = 'home' | 'profile' | 'history' | 'route'
 
 type Driver = {
   id: string
@@ -31,7 +37,12 @@ type Driver = {
   vehicle_type: string | null
   vehicle_plate: string | null
   is_active: boolean
-  organization_id: string
+  /**
+   * `null` para um entregador puramente regional (só possui driver_profiles,
+   * sem vínculo em driver_accounts/drivers de nenhum restaurante ainda) —
+   * ver o fallback em loadDriver().
+   */
+  organization_id: string | null
 }
 
 type LocationData = {
@@ -403,6 +414,25 @@ function App() {
   const backgroundTrackingStarted = useRef(false)
 
   // =========================================================
+  // DESPACHO REGIONAL
+  // =========================================================
+  // Chamado incondicionalmente (regra dos hooks) mesmo antes do login —
+  // fica inerte (enabled=false) enquanto não há sessão/tracking.
+  const deliveryOffers = useDeliveryOffers(authenticated && tracking)
+
+  useEffect(() => {
+    if (!authenticated || !driver) return
+    void registerForPush(driver.id)
+    return onNotificationOpened(() => {
+      // O payload do push só serve de gatilho — o estado real (se a
+      // oferta ainda está pendente) é sempre buscado de novo pelo
+      // polling do useDeliveryOffers assim que o app volta ao primeiro
+      // plano, nunca confiado diretamente.
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, driver?.id])
+
+  // =========================================================
   // SINCRONIZAÇÃO
   // =========================================================
 
@@ -671,10 +701,32 @@ function App() {
       throw accountError
     }
 
+    // Sem vínculo em driver_accounts (nenhum restaurante o cadastrou como
+    // "entregador da loja" ainda): trata como entregador puramente
+    // regional, cuja identidade vem de driver_profiles em vez de drivers.
+    // O fluxo legado abaixo (driver_accounts -> drivers) continua 100%
+    // inalterado para quem já tem vínculo.
     if (!account) {
-      throw new Error(
-        'Esta conta não está vinculada a um entregador.',
-      )
+      const profile = await ensureDriverProfile()
+
+      if (!profile.is_active) {
+        throw new Error('Este entregador está inativo.')
+      }
+
+      const regionalDriver: Driver = {
+        id: profile.id,
+        name: profile.full_name || 'Entregador',
+        phone: profile.phone,
+        vehicle_type: profile.vehicle_type,
+        vehicle_plate: profile.vehicle_plate,
+        is_active: profile.is_active,
+        organization_id: null,
+      }
+
+      setDriver(regionalDriver)
+      populateProfile(regionalDriver)
+
+      return regionalDriver
     }
 
     const { data: driverData, error: driverError } =
@@ -702,6 +754,13 @@ function App() {
 
     setDriver(typedDriver)
     populateProfile(typedDriver)
+
+    // Também garante um driver_profiles para entregadores "da loja" —
+    // habilita-os a participar do despacho regional futuramente, sem exigir
+    // nenhuma ação extra deles agora. Nunca bloqueia o login se falhar.
+    ensureDriverProfile().catch((error) =>
+      console.error('ERRO_ENSURE_DRIVER_PROFILE:', error),
+    )
 
     return typedDriver
   }
@@ -1210,6 +1269,17 @@ function App() {
         throw error
       }
 
+      // Sinal de disponibilidade para o despacho regional — nunca pode
+      // interromper o GPS legado acima, por isso não é aguardado nem
+      // lança: updateMyPresence já engole os próprios erros.
+      void updateMyPresence('online', {
+        latitude,
+        longitude,
+        accuracy,
+        speed,
+        heading,
+      })
+
       const syncedTimestamp = data
         ? new Date(data).getTime()
         : Date.now()
@@ -1521,6 +1591,13 @@ function App() {
         'Localização pausada',
       )
 
+      // Sai do pool de matching regional. Não bloqueia o encerramento do
+      // trabalho se falhar (já registra o próprio erro).
+      void updateMyPresence('offline', {
+        latitude: location?.latitude ?? null,
+        longitude: location?.longitude ?? null,
+      })
+
       return true
     } catch (error) {
       console.error(
@@ -1795,6 +1872,21 @@ function App() {
           >
             <span>◷</span>
             Histórico
+          </button>
+
+          <button
+            type="button"
+            className={
+              view === 'route'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              navigate('route')
+            }
+          >
+            <span>▤</span>
+            Minha rota
           </button>
         </nav>
 
@@ -2831,8 +2923,24 @@ function App() {
 
           {view === 'history' &&
             historyView}
+
+          {view === 'route' && <MyRouteScreen />}
         </div>
       </section>
+
+      {deliveryOffers.offer && (
+        <DeliveryOfferModal
+          offer={deliveryOffers.offer}
+          busy={deliveryOffers.busy}
+          error={deliveryOffers.error}
+          onAccept={() => {
+            void deliveryOffers.accept().then((routeId) => {
+              if (routeId) navigate('route')
+            })
+          }}
+          onDecline={() => void deliveryOffers.decline()}
+        />
+      )}
     </main>
   )
 }
