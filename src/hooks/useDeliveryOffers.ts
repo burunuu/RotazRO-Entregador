@@ -15,6 +15,9 @@ export function useDeliveryOffers(enabled: boolean) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Permite a um evento externo (push tocado/recebido) forçar uma busca
+  // imediata em vez de esperar o próximo tick do polling de 5s.
+  const pollNow = useRef<() => void>(() => {})
 
   useEffect(() => {
     if (!enabled) {
@@ -23,6 +26,7 @@ export function useDeliveryOffers(enabled: boolean) {
         timer.current = null
       }
       setOffer(null)
+      pollNow.current = () => {}
       return
     }
 
@@ -42,15 +46,22 @@ export function useDeliveryOffers(enabled: boolean) {
       }
     }
 
+    pollNow.current = () => void poll()
     void poll()
     timer.current = setInterval(() => void poll(), POLL_MS)
 
     return () => {
       cancelled = true
+      pollNow.current = () => {}
       if (timer.current) clearInterval(timer.current)
       timer.current = null
     }
   }, [enabled])
+
+  /** Busca o estado real agora — nunca confia no payload do push, sempre refaz do banco. */
+  function refetch() {
+    pollNow.current()
+  }
 
   async function accept(): Promise<string | null> {
     if (!offer || busy) return null
@@ -85,5 +96,5 @@ export function useDeliveryOffers(enabled: boolean) {
     }
   }
 
-  return { offer, error, busy, accept, decline }
+  return { offer, error, busy, accept, decline, refetch }
 }

@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase'
  */
 
 let listenersRegistered = false
+let currentPushToken: string | null = null
 
 async function upsertDeviceToken(driverProfileId: string, token: string) {
   const platform = Capacitor.getPlatform() === 'ios' ? 'ios' : 'android'
@@ -59,6 +60,7 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
       listenersRegistered = true
 
       PushNotifications.addListener('registration', (token: Token) => {
+        currentPushToken = token.value
         void upsertDeviceToken(driverProfileId, token.value).catch((err) =>
           console.error('ERRO_REGISTRAR_PUSH_TOKEN:', err),
         )
@@ -99,10 +101,17 @@ export function onNotificationOpened(handler: (offerId: string | null) => void):
   }
 }
 
-/** Chamar no logout: revoga o token atual para que ofertas parem de chegar a este dispositivo. */
+/**
+ * Chamar no logout: revoga o token atual em driver_devices (para que ofertas
+ * parem de chegar a este dispositivo assim que o entregador sai da conta) e
+ * limpa notificações já entregues. Não lança — logout não pode falhar por
+ * causa de push.
+ */
 export async function unregisterPush(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
   try {
+    await revokeCurrentDeviceToken(currentPushToken)
+    currentPushToken = null
     const delivered = await PushNotifications.getDeliveredNotifications()
     await PushNotifications.removeAllDeliveredNotifications()
     void delivered

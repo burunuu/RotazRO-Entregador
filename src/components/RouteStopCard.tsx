@@ -21,12 +21,19 @@ type RouteStopCardProps = {
   busy: boolean
   onDeliver: () => void
   onReportOccurrence: (occurrenceType: string, note: string) => void
+  onSetNote: (note: string) => void
 }
 
-export function RouteStopCard({ stop, busy, onDeliver, onReportOccurrence }: RouteStopCardProps) {
+export function RouteStopCard({ stop, busy, onDeliver, onReportOccurrence, onSetNote }: RouteStopCardProps) {
   const [occurrenceOpen, setOccurrenceOpen] = useState(false)
   const [occurrenceType, setOccurrenceType] = useState(OCCURRENCE_OPTIONS[0].value)
   const [occurrenceNote, setOccurrenceNote] = useState('')
+
+  // Observação de execução (route_stops.execution_note) — separada da
+  // observação original do pedido (stop.notes, só leitura) e da observação
+  // de ocorrência (painel "Problema na entrega" abaixo).
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [noteDraft, setNoteDraft] = useState(stop.executionNote ?? '')
 
   const amount = formatCents(stop.amountDueCents)
   const change = formatCents(stop.changeForCents)
@@ -65,10 +72,54 @@ export function RouteStopCard({ stop, busy, onDeliver, onReportOccurrence }: Rou
           <strong>Observação:</strong> {stop.notes}
         </p>
       )}
-      {stop.executionNote && (
-        <p>
-          <strong>Observação da execução:</strong> {stop.executionNote}
-        </p>
+      {!noteOpen && (
+        <>
+          {stop.executionNote && (
+            <p>
+              <strong>Observação da execução:</strong> {stop.executionNote}
+            </p>
+          )}
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => {
+              setNoteDraft(stop.executionNote ?? '')
+              setNoteOpen(true)
+            }}
+          >
+            {stop.executionNote ? 'Editar observação' : 'Adicionar observação'}
+          </button>
+        </>
+      )}
+
+      {noteOpen && (
+        <div className="occurrence-panel">
+          <label>
+            Observação da execução (opcional)
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value.slice(0, 500))}
+              maxLength={500}
+              rows={2}
+            />
+          </label>
+          <div className="route-stop-actions">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onSetNote(noteDraft)
+                setNoteOpen(false)
+              }}
+            >
+              Salvar observação
+            </button>
+            <button type="button" className="secondary" disabled={busy} onClick={() => setNoteOpen(false)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
       )}
 
       <div className="route-stop-actions">

@@ -6,7 +6,7 @@ import { BackgroundGeolocation } from '@capgo/background-geolocation'
 import { supabase } from './lib/supabase'
 import { ensureDriverProfile } from './services/driver-identity'
 import { updateMyPresence } from './services/presence'
-import { registerForPush, onNotificationOpened } from './services/notifications'
+import { registerForPush, onNotificationOpened, unregisterPush } from './services/notifications'
 import { useDeliveryOffers } from './hooks/useDeliveryOffers'
 import { DeliveryOfferModal } from './components/DeliveryOfferModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
@@ -424,10 +424,13 @@ function App() {
     if (!authenticated || !driver) return
     void registerForPush(driver.id)
     return onNotificationOpened(() => {
-      // O payload do push só serve de gatilho — o estado real (se a
-      // oferta ainda está pendente) é sempre buscado de novo pelo
-      // polling do useDeliveryOffers assim que o app volta ao primeiro
-      // plano, nunca confiado diretamente.
+      // O payload do push só serve de gatilho — o estado real (se a oferta
+      // ainda está pendente) é sempre buscado de novo do banco, nunca
+      // confiado diretamente. Isso apenas adianta o próximo tick do
+      // polling de 5s: se a oferta já foi expirada/cancelada/aceita por
+      // outro entregador, o refetch simplesmente não encontra nada e o
+      // modal não aparece.
+      deliveryOffers.refetch()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, driver?.id])
@@ -1639,6 +1642,10 @@ function App() {
 
       return
     }
+
+    // Precisa rodar antes do signOut: a revogação do token grava em
+    // driver_devices via RLS, que exige a sessão ainda autenticada.
+    await unregisterPush()
 
     await supabase.auth.signOut()
 

@@ -88,6 +88,7 @@ export function MyRouteScreen() {
           busy={currentRoute.actionBusy}
           onDeliver={() => void currentRoute.deliver(next.id)}
           onReportOccurrence={(type, note) => void currentRoute.reportOccurrence(next.id, type, note)}
+          onSetNote={(note) => void currentRoute.setNote(next.id, note)}
         />
       )}
 
