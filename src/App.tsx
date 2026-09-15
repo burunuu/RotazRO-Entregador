@@ -183,14 +183,11 @@ function formatClock(date: Date) {
   })
 }
 
-function formatLongDate(date: Date) {
-  const formatted = date.toLocaleDateString('pt-BR', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-  })
+const SHORT_MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
 
-  return formatted.charAt(0).toUpperCase() + formatted.slice(1)
+/** Versão compacta da data para o indicador discreto no topo da Home (ex.: "14 set"). */
+function formatShortDate(date: Date) {
+  return `${date.getDate()} ${SHORT_MONTHS[date.getMonth()]}`
 }
 
 function formatDate(value: string | null) {
@@ -2000,18 +1997,29 @@ function App() {
           </p>
         </div>
 
-        <div
-          className={`work-badge ${
-            tracking
-              ? 'online'
-              : ''
-          }`}
-        >
-          <span />
+        <div className="home-hero-meta">
+          <div className="home-datetime">
+            <span className="home-datetime-weather">
+              {temperature != null ? `${Math.round(temperature)}°C` : weatherLoading ? '...' : '—'} ☀
+            </span>
+            <span className="home-datetime-date">
+              {formatShortDate(currentDateTime)} • {formatClock(currentDateTime)}
+            </span>
+          </div>
 
-          {tracking
-            ? 'Em trabalho'
-            : 'Fora de expediente'}
+          <div
+            className={`work-badge ${
+              tracking
+                ? 'online'
+                : ''
+            }`}
+          >
+            <span />
+
+            {tracking
+              ? 'Em trabalho'
+              : 'Fora de expediente'}
+          </div>
         </div>
       </section>
 
@@ -2156,46 +2164,6 @@ function App() {
               : 'Encerrar trabalho'}
           </button>
         )}
-      </section>
-
-      <section className="day-info-card home-secondary">
-        <div className="day-info-main">
-          <small>AGORA</small>
-
-          <strong>
-            {formatLongDate(
-              currentDateTime,
-            )}
-          </strong>
-
-          <span>
-            {formatClock(
-              currentDateTime,
-            )}
-          </span>
-        </div>
-
-        <div className="weather-display">
-          <span className="weather-icon">
-            ☀
-          </span>
-
-          <div>
-            <strong>
-              {temperature != null
-                ? `${Math.round(
-                    temperature,
-                  )}°C`
-                : weatherLoading
-                  ? '...'
-                  : '—'}
-            </strong>
-
-            <small>
-              Temperatura local
-            </small>
-          </div>
-        </div>
       </section>
 
       <section className="section-block">

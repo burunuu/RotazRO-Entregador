@@ -517,74 +517,34 @@ h2 {
 }
 
 /* =========================================================
-   DATA / HORA / CLIMA
+   DATA / HORA / CLIMA — indicador discreto no topo da Home (não é mais
+   um card próprio; fica junto do work-badge, à direita da saudação).
    ========================================================= */
 
-.day-info-card {
+.home-hero-meta {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 22px;
-  margin-bottom: 18px;
-  padding: 18px 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow:
-    0 1px 2px rgba(32, 32, 32, 0.02),
-    0 12px 28px rgba(32, 32, 32, 0.025);
+  flex-direction: column;
+  align-items: flex-end;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
-.day-info-main {
-  display: grid;
-  gap: 3px;
-}
-
-.day-info-main small {
-  color: var(--accent);
-  font-family:
-    'IBM Plex Mono',
-    ui-monospace,
-    monospace;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.day-info-main strong {
-  font-size: 15px;
-}
-
-.day-info-main span {
-  color: var(--text-muted);
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.035em;
-}
-
-.weather-display {
+.home-datetime {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
 }
 
-.weather-icon {
-  font-size: 25px;
+.home-datetime-weather {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
 }
 
-.weather-display > div {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
-}
-
-.weather-display strong {
-  font-size: 23px;
-}
-
-.weather-display small {
+.home-datetime-date {
+  font-size: 11px;
   color: var(--text-muted);
-  font-size: 10px;
 }
 
 /* =========================================================
@@ -1266,18 +1226,6 @@ button.secondary:hover:not(:disabled) {
     border-radius: 18px;
   }
 
-  .day-info-card {
-    padding: 16px;
-  }
-
-  .day-info-main span {
-    font-size: 23px;
-  }
-
-  .weather-display strong {
-    font-size: 21px;
-  }
-
   .history-summary {
     grid-template-columns: 1fr 1fr;
   }
@@ -1296,19 +1244,6 @@ button.secondary:hover:not(:disabled) {
 }
 
 @media (max-width: 390px) {
-  .day-info-card {
-    align-items: flex-start;
-    gap: 14px;
-  }
-
-  .weather-display {
-    align-items: flex-start;
-  }
-
-  .weather-icon {
-    display: none;
-  }
-
   .metric-grid {
     gap: 8px;
   }
@@ -1885,7 +1820,16 @@ button.secondary {
    HOME — ROTA ATRIBUÍDA (loja ou regional)
    ========================================================= */
 
+/* Mesmo sistema de largura dos outros cards principais da Home
+   (.home-hero, .section-block): nenhum deles usa .card, então nenhum
+   herda o max-width:520px pensado para telas de login/forms estreitos.
+   Este card usa .card (pelo border/radius/shadow), então precisa
+   sobrescrever max-width explicitamente — regra estrutural, não margem
+   manual — para ficar exatamente do mesmo tamanho/eixo que os demais. */
 .assigned-route-card {
+  width: 100%;
+  max-width: none;
+  margin-inline: auto;
   padding: 18px;
   border: 1px solid var(--accent);
   background: var(--accent-soft);
@@ -2080,9 +2024,4 @@ button.secondary {
 
 .occurrence-sheet-confirm {
   margin-top: 14px;
-}
-
-.home-secondary {
-  margin-top: 18px;
-  opacity: 0.92;
 }
