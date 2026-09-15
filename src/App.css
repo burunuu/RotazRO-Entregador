@@ -1817,6 +1817,13 @@ button.secondary {
   padding: 0 10px;
 }
 
+/* Com só 3 ações (Maps/Ligar/Entregue), a última fica sozinha na
+   grade de 2 colunas — estica pra linha toda em vez de ficar
+   desalinhada à esquerda ocupando meia largura. */
+.route-stop-actions-grid > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .route-stop-problem-toggle {
   margin-top: 8px;
   border-color: var(--warning);
@@ -1974,6 +1981,162 @@ button.secondary {
   margin: 2px 0 14px;
   font-size: 13.5px;
   color: var(--text-muted);
+}
+
+/* =========================================================
+   BOTÃO DE AÇÃO PRINCIPAL (laranja/dourado) — Entregue, Iniciar rota,
+   Finalizar rota. Mesmo tom (bg-primary) usado no portal Web para as
+   mesmas ações.
+   ========================================================= */
+
+.button-accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.button-accent:hover:not(:disabled) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.button-accent:active:not(:disabled) {
+  background: var(--accent-dark);
+  transform: translateY(1px);
+}
+
+.button-accent:disabled {
+  background: var(--surface-strong);
+  border-color: var(--surface-strong);
+  color: var(--text-soft);
+  opacity: 1;
+}
+
+.route-problem-button {
+  margin-top: 6px;
+  border-color: var(--warning);
+  color: var(--warning-strong);
+  background: var(--warning-bg);
+}
+
+/* =========================================================
+   OCORRÊNCIA — ação única no fim da lista (bottom sheet)
+   ========================================================= */
+
+.occurrence-sheet {
+  width: 100%;
+  max-width: 460px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.occurrence-sheet-header {
+  position: relative;
+  padding-right: 32px;
+}
+
+.occurrence-sheet-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.occurrence-sheet-subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.occurrence-sheet-close {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border-color: var(--surface-soft);
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+}
+
+.occurrence-sheet-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.occurrence-sheet-list-item {
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text);
+  text-align: left;
+}
+
+.occurrence-sheet-list-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.occurrence-sheet-list-text strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.occurrence-sheet-list-text small {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.occurrence-sheet-back {
+  align-self: flex-start;
+  width: auto;
+  min-height: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.occurrence-sheet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.occurrence-sheet-field select,
+.occurrence-sheet-field textarea {
+  font: inherit;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.occurrence-sheet button.button-warning {
+  margin-top: 14px;
 }
 
 .home-secondary {

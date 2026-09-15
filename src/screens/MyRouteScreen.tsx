@@ -1,7 +1,8 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useCurrentRoute } from '../hooks/useCurrentRoute'
 import { RouteProgress } from '../components/RouteProgress'
 import { RouteStopCard } from '../components/RouteStopCard'
+import { OccurrenceSheet } from '../components/OccurrenceSheet'
 import { deliveredCount, nextPendingStop } from '../services/routes'
 import { fullRouteUrls, singleStopMapsUrl, MAX_STOPS_PER_LINK } from '../services/maps-links'
 
@@ -31,6 +32,7 @@ const STATUS_LABEL: Record<string, string> = {
  */
 export function MyRouteScreen() {
   const currentRoute = useCurrentRoute()
+  const [occurrenceOpen, setOccurrenceOpen] = useState(false)
 
   useEffect(() => {
     void currentRoute.refresh()
@@ -103,7 +105,12 @@ export function MyRouteScreen() {
         {currentRoute.error && <div className="error">{currentRoute.error}</div>}
 
         {route.status === 'confirmed' && (
-          <button type="button" disabled={currentRoute.actionBusy} onClick={() => void currentRoute.start(route.id)}>
+          <button
+            type="button"
+            className="button-accent"
+            disabled={currentRoute.actionBusy}
+            onClick={() => void currentRoute.start(route.id)}
+          >
             {currentRoute.actionBusy ? 'Iniciando...' : 'Iniciar rota'}
           </button>
         )}
@@ -155,15 +162,24 @@ export function MyRouteScreen() {
                 running={running}
                 busy={currentRoute.actionBusy}
                 onDeliver={() => void currentRoute.deliver(stop.id)}
-                onReportOccurrence={(type, note) => void currentRoute.reportOccurrence(stop.id, type, note)}
-                onSetNote={(note) => void currentRoute.setNote(stop.id, note)}
               />
             </li>
           ))}
         </ol>
 
+        {running && next !== null && (
+          <button type="button" className="secondary route-problem-button" onClick={() => setOccurrenceOpen(true)}>
+            Problema com alguma entrega?
+          </button>
+        )}
+
         {running && total > 0 && next === null && (
-          <button type="button" disabled={currentRoute.actionBusy} onClick={() => void currentRoute.complete(route.id)}>
+          <button
+            type="button"
+            className="button-accent"
+            disabled={currentRoute.actionBusy}
+            onClick={() => void currentRoute.complete(route.id)}
+          >
             {currentRoute.actionBusy ? 'Finalizando...' : 'Finalizar rota'}
           </button>
         )}
@@ -196,6 +212,22 @@ export function MyRouteScreen() {
           </section>
         )}
       </div>
+
+      <OccurrenceSheet
+        open={occurrenceOpen}
+        stops={route.stops}
+        busy={currentRoute.actionBusy}
+        error={currentRoute.error}
+        onClose={() => setOccurrenceOpen(false)}
+        onConfirm={(stopId, type, note) => {
+          // runAction devolve null quando a ação falha — só fecha o sheet
+          // em caso de sucesso, senão o erro (mostrado dentro do sheet)
+          // desapareceria junto.
+          void currentRoute.reportOccurrence(stopId, type, note).then((result) => {
+            if (result !== null) setOccurrenceOpen(false)
+          })
+        }}
+      />
     </div>
   )
 }

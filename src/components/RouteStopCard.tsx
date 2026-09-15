@@ -1,19 +1,6 @@
-import { useState } from 'react'
 import type { MyRouteStop } from '../services/routes'
 import { singleStopMapsUrl } from '../services/maps-links'
-
-const OCCURRENCE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'customer_absent', label: 'Cliente ausente' },
-  { value: 'no_answer', label: 'Não atendeu' },
-  { value: 'wrong_address', label: 'Endereço incorreto' },
-  { value: 'refused', label: 'Cliente recusou' },
-  { value: 'reschedule', label: 'Reagendar' },
-  { value: 'other', label: 'Outro' },
-]
-
-const OCCURRENCE_LABELS: Record<string, string> = Object.fromEntries(
-  OCCURRENCE_OPTIONS.map((o) => [o.value, o.label]),
-)
+import { OCCURRENCE_LABELS } from '../lib/occurrence-options'
 
 function formatCents(cents: number | null): string | null {
   if (cents == null) return null
@@ -45,29 +32,18 @@ type RouteStopCardProps = {
   running: boolean
   busy: boolean
   onDeliver: () => void
-  onReportOccurrence: (occurrenceType: string, note: string) => void
-  onSetNote: (note: string) => void
 }
 
-export function RouteStopCard({
-  stop,
-  isNext,
-  running,
-  busy,
-  onDeliver,
-  onReportOccurrence,
-  onSetNote,
-}: RouteStopCardProps) {
-  const [occurrenceOpen, setOccurrenceOpen] = useState(false)
-  const [occurrenceType, setOccurrenceType] = useState(OCCURRENCE_OPTIONS[0].value)
-  const [occurrenceNote, setOccurrenceNote] = useState('')
-
-  // Observação de execução (route_stops.execution_note) — separada da
-  // observação original do pedido (stop.notes, só leitura) e da observação
-  // de ocorrência (painel "Problema na entrega" abaixo).
-  const [noteOpen, setNoteOpen] = useState(false)
-  const [noteDraft, setNoteDraft] = useState(stop.executionNote ?? '')
-
+/**
+ * Card individual de uma parada — paridade visual com o portal Web
+ * (e.$token.tsx). Ações por card: Maps, Ligar, Entregue. "Problema na
+ * entrega" deixou de ser por card — agora é uma ação única no fim da
+ * lista (ver OccurrenceSheet em MyRouteScreen), escolhendo a parada lá.
+ * Observação de execução (set_my_stop_note) segue disponível no
+ * serviço/hook (useCurrentRoute.setNote), só não tem mais gatilho na UI
+ * principal.
+ */
+export function RouteStopCard({ stop, isNext, running, busy, onDeliver }: RouteStopCardProps) {
   const amount = formatCents(stop.amountDueCents)
   const change = formatCents(stop.changeForCents)
   const method = paymentLabel(stop.paymentMethod)
@@ -133,7 +109,7 @@ export function RouteStopCard({
             </dl>
           )}
 
-          {stop.executionNote && !noteOpen && (
+          {stop.executionNote && (
             <p className="route-stop-execution-note">
               <strong>Observação da entrega:</strong> {stop.executionNote}
             </p>
@@ -157,20 +133,10 @@ export function RouteStopCard({
             Ligar
           </a>
         )}
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy}
-          onClick={() => {
-            setNoteDraft(stop.executionNote ?? '')
-            setNoteOpen((v) => !v)
-          }}
-        >
-          Observação
-        </button>
         {!closed && (
           <button
             type="button"
+            className="button-accent"
             disabled={!running || busy}
             onClick={() => {
               if (window.confirm(`Confirmar entrega de ${stop.customerName}?`)) onDeliver()
@@ -180,84 +146,6 @@ export function RouteStopCard({
           </button>
         )}
       </div>
-
-      {!closed && running && (
-        <button
-          type="button"
-          className="secondary route-stop-problem-toggle"
-          disabled={busy}
-          onClick={() => setOccurrenceOpen((open) => !open)}
-        >
-          Problema na entrega
-        </button>
-      )}
-
-      {noteOpen && (
-        <div className="occurrence-panel">
-          <label>
-            Observação da entrega (opcional)
-            <textarea
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value.slice(0, 500))}
-              maxLength={500}
-              rows={2}
-              placeholder="Ex.: deixado com o porteiro"
-            />
-          </label>
-          <div className="route-stop-actions">
-            <button type="button" className="secondary" disabled={busy} onClick={() => setNoteOpen(false)}>
-              Cancelar
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                onSetNote(noteDraft)
-                setNoteOpen(false)
-              }}
-            >
-              Salvar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {occurrenceOpen && (
-        <div className="occurrence-panel">
-          <label>
-            Motivo
-            <select value={occurrenceType} onChange={(e) => setOccurrenceType(e.target.value)}>
-              {OCCURRENCE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Observação (opcional)
-            <textarea
-              value={occurrenceNote}
-              onChange={(e) => setOccurrenceNote(e.target.value.slice(0, 500))}
-              maxLength={500}
-              rows={3}
-              placeholder="Ex.: interfone não funcionou"
-            />
-          </label>
-          <button
-            type="button"
-            className="button-warning"
-            disabled={busy}
-            onClick={() => {
-              onReportOccurrence(occurrenceType, occurrenceNote)
-              setOccurrenceOpen(false)
-              setOccurrenceNote('')
-            }}
-          >
-            {busy ? 'Registrando...' : 'Confirmar ocorrência'}
-          </button>
-        </div>
-      )}
     </article>
   )
 }
