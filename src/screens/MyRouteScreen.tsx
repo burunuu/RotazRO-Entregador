@@ -3,17 +3,13 @@ import { useCurrentRoute } from '../hooks/useCurrentRoute'
 import { RouteProgress } from '../components/RouteProgress'
 import { RouteStopCard } from '../components/RouteStopCard'
 import { OccurrenceSheet } from '../components/OccurrenceSheet'
-import { deliveredCount, nextPendingStop } from '../services/routes'
+import { deliveredCount, nextPendingStop, routeRealDurationS } from '../services/routes'
 import { fullRouteUrls, singleStopMapsUrl, MAX_STOPS_PER_LINK } from '../services/maps-links'
+import { formatDuration } from '../lib/format'
 
 function formatKm(meters: number | null): string {
   if (meters == null) return '—'
   return `${(meters / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km`
-}
-
-function formatMinutes(seconds: number | null): string {
-  if (seconds == null || seconds <= 0) return '—'
-  return `${Math.max(1, Math.round(seconds / 60))} min`
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -23,6 +19,23 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelada',
 }
 
+// Quanto tempo o resumo "rota concluída" fica na tela antes de voltar
+// sozinho pro início — dá tempo de ler os números sem prender o
+// entregador numa tela morta indefinidamente.
+const AUTO_HOME_DELAY_MS = 2500
+
+type FinishedRecap = {
+  delivered: number
+  distanceM: number | null
+  durationS: number | null
+  organizationName: string
+}
+
+type MyRouteScreenProps = {
+  /** Chamado ao sair da tela de resumo pós-finalização (manual ou automático). */
+  onFinished: () => void
+}
+
 /**
  * Reaproveita o mesmo modelo do portal do entregador (route_stops,
  * occurrence_type/occurrence_at, execution_note) — ver
@@ -30,9 +43,10 @@ const STATUS_LABEL: Record<string, string> = {
  * visual/funcional desta tela. Autorização aqui é pela identidade do
  * entregador (RLS via driver_owns_route), não por token.
  */
-export function MyRouteScreen() {
+export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
   const currentRoute = useCurrentRoute()
   const [occurrenceOpen, setOccurrenceOpen] = useState(false)
+  const [finishedRecap, setFinishedRecap] = useState<FinishedRecap | null>(null)
 
   useEffect(() => {
     void currentRoute.refresh()
@@ -41,10 +55,18 @@ export function MyRouteScreen() {
 
   const route = currentRoute.route
 
-  // route_stops.status é a fonte da verdade de pendência (delivered/failed/
-  // skipped fecham a parada) — a rota completa no Maps nunca pode incluir
-  // paradas já fechadas, senão reabre destinos já resolvidos. A ordem
-  // (position) das restantes é preservada, sem reotimizar.
+  // Volta sozinho pro início depois de mostrar o resumo — sem isso o
+  // entregador ficava preso em "Nenhuma rota atribuída no momento." (a
+  // rota some da consulta assim que o status vira completed).
+  useEffect(() => {
+    if (!finishedRecap) return
+    const timer = setTimeout(() => onFinished(), AUTO_HOME_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [finishedRecap, onFinished])
+
+  // Hooks sempre incondicionais (Rules of Hooks) — mesmo no estado
+  // "finishedRecap", que não usa estes valores, mas precisa rodar os
+  // mesmos hooks em toda renderização.
   const pendingStopsForMaps = useMemo(() => route?.stops.filter((s) => s.status === 'pending') ?? [], [route])
 
   const fullLinks = useMemo(() => {
@@ -54,6 +76,36 @@ export function MyRouteScreen() {
       pendingStopsForMaps.map((s) => ({ latitude: s.latitude, longitude: s.longitude })),
     )
   }, [route, pendingStopsForMaps])
+
+  if (finishedRecap) {
+    return (
+      <section className="card route-summary-card">
+        <p className="eyebrow">ROTA CONCLUÍDA</p>
+        <div className="route-summary-grid">
+          <div>
+            <span className="offer-modal-label">Entregas realizadas</span>
+            <strong>{finishedRecap.delivered}</strong>
+          </div>
+          <div>
+            <span className="offer-modal-label">Distância</span>
+            <strong>{formatKm(finishedRecap.distanceM)}</strong>
+          </div>
+          <div>
+            <span className="offer-modal-label">Tempo total</span>
+            <strong>{formatDuration(finishedRecap.durationS)}</strong>
+          </div>
+          <div>
+            <span className="offer-modal-label">Restaurante</span>
+            <strong>{finishedRecap.organizationName}</strong>
+          </div>
+        </div>
+        <p className="route-finished-message">Rota concluída. Bom trabalho!</p>
+        <button type="button" className="button-accent" onClick={onFinished}>
+          Voltar para o início
+        </button>
+      </section>
+    )
+  }
 
   if (currentRoute.loading && !route) {
     return (
@@ -113,7 +165,7 @@ export function MyRouteScreen() {
             </div>
           </div>
           <p className="route-top-summary-meta">
-            {formatKm(route.totalDistanceM)} • {formatMinutes(route.estimatedDurationS)}
+            {formatKm(route.totalDistanceM)} • {formatDuration(route.estimatedDurationS)}
             {failed > 0 ? ` • ${failed} ${failed === 1 ? 'ocorrência' : 'ocorrências'}` : ''}
           </p>
         </section>
@@ -196,15 +248,40 @@ export function MyRouteScreen() {
             type="button"
             className="button-accent"
             disabled={currentRoute.actionBusy}
-            onClick={() => void currentRoute.complete(route.id)}
+            onClick={() => {
+              // Snapshot antes de chamar complete(): assim que o status vira
+              // completed, fetchMyActiveRoute() para de devolver esta rota
+              // (só busca confirmed/in_progress) — sem isso não haveria como
+              // mostrar o resumo depois.
+              const startedAt = route.startedAt
+              const snapshot: Omit<FinishedRecap, 'durationS'> = {
+                delivered,
+                distanceM: route.totalDistanceM,
+                organizationName: route.organizationName,
+              }
+              const estimatedFallback = route.estimatedDurationS
+              void currentRoute.complete(route.id).then((result) => {
+                if (result === null) return
+                // Duração real (completed_at - started_at): completed_at do
+                // servidor ainda não foi buscado de volta (a rota já saiu do
+                // filtro ativo), então usamos "agora" no cliente como proxy —
+                // no máximo alguns segundos de diferença do timestamp real
+                // gravado no banco. O histórico usa o valor real do banco.
+                const durationS =
+                  startedAt != null
+                    ? Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)
+                    : estimatedFallback
+                setFinishedRecap({ ...snapshot, durationS })
+              })
+            }}
           >
             {currentRoute.actionBusy ? 'Finalizando...' : 'Finalizar rota'}
           </button>
         )}
 
-        {(finished || route.status === 'completed') && (
+        {finished && (
           <section className="card route-summary-card">
-            <p className="eyebrow">ROTA CONCLUÍDA</p>
+            <p className="eyebrow">QUASE LÁ</p>
             <div className="route-summary-grid">
               <div>
                 <span className="offer-modal-label">Entregas realizadas</span>
@@ -215,18 +292,14 @@ export function MyRouteScreen() {
                 <strong>{formatKm(route.totalDistanceM)}</strong>
               </div>
               <div>
-                <span className="offer-modal-label">Tempo</span>
-                <strong>{formatMinutes(route.estimatedDurationS)}</strong>
+                <span className="offer-modal-label">Tempo total</span>
+                <strong>{formatDuration(routeRealDurationS(route))}</strong>
               </div>
               <div>
                 <span className="offer-modal-label">Restaurante</span>
                 <strong>{route.organizationName}</strong>
               </div>
             </div>
-
-            {route.status === 'completed' && (
-              <p className="route-finished-message">Rota concluída. Bom trabalho!</p>
-            )}
           </section>
         )}
       </div>

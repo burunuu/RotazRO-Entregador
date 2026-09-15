@@ -13,6 +13,7 @@ import { DeliveryOfferModal } from './components/DeliveryOfferModal'
 import { AssignedRouteModal } from './components/AssignedRouteModal'
 import { AssignedRouteCard } from './components/AssignedRouteCard'
 import { MyRouteScreen } from './screens/MyRouteScreen'
+import { formatDuration, routeStatusLabel } from './lib/format'
 import './App.css'
 
 const LOCATION_SYNC_INTERVAL_MS = 8000
@@ -220,23 +221,6 @@ function formatDistance(meters: number) {
   if (!Number.isFinite(meters) || meters <= 0) return '0 km'
 
   return `${(meters / 1000).toFixed(1)} km`
-}
-
-function formatDuration(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '—'
-
-  const roundedMinutes = Math.round(seconds / 60)
-
-  if (roundedMinutes < 60) {
-    return `${roundedMinutes} min`
-  }
-
-  const hours = Math.floor(roundedMinutes / 60)
-  const minutes = roundedMinutes % 60
-
-  if (minutes === 0) return `${hours}h`
-
-  return `${hours}h ${minutes}min`
 }
 
 function formatMoney(cents: number | null) {
@@ -970,6 +954,52 @@ function App() {
       setHistoryLoading(false)
     }
   }
+
+  // =========================================================
+  // HISTÓRICO — REALTIME
+  // =========================================================
+  // Só assina enquanto a tela de Histórico está aberta — não fica um canal
+  // parado aberto o resto do tempo que o entregador passa no app (Home,
+  // Minha Rota, etc. têm seus próprios ciclos de vida). Filtra por
+  // driver_id (não por uma rota específica, como useCurrentRoute): aqui o
+  // interesse é "alguma rota minha mudou de status/distância real/hora de
+  // conclusão", não o detalhe ao vivo de uma execução em curso — por isso
+  // não assina route_stops nem mantém um poll de baixa frequência próprio:
+  // toda vez que o entregador entra em Histórico, loadHistory() já busca
+  // os dados atuais (ver navigate()), então Realtime aqui só cobre ficar
+  // OLHANDO a tela enquanto algo muda — um caso bem mais raro que o de
+  // uma rota ativa em execução.
+  useEffect(() => {
+    if (view !== 'history' || !driver) return
+    const driverId = driver.id
+
+    let cancelled = false
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+    function scheduleReload() {
+      if (cancelled) return
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        if (!cancelled) void loadHistory(driverId)
+      }, 300)
+    }
+
+    const channel = supabase
+      .channel(`history-${driverId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'routes', filter: `driver_id=eq.${driverId}` },
+        scheduleReload,
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      if (debounceTimer) clearTimeout(debounceTimer)
+      void supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, driver])
 
   // =========================================================
   // SESSÃO
@@ -1901,7 +1931,7 @@ function App() {
               navigate('route')
             }
           >
-            <span>▤</span>
+            <span>⊙</span>
             Minha rota
           </button>
         </nav>
@@ -2629,22 +2659,11 @@ function App() {
           Rotas realizadas
         </h2>
 
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={() => {
-            if (driver) {
-              void loadHistory(
-                driver.id,
-              )
-            }
-          }}
-          disabled={historyLoading}
-        >
-          {historyLoading
-            ? 'Atualizando...'
-            : 'Atualizar'}
-        </button>
+        {historyLoading && (
+          <span className="history-sync-hint">
+            Atualizando...
+          </span>
+        )}
       </div>
 
       {historyError && (
@@ -2729,9 +2748,7 @@ function App() {
                             : ''
                         }`}
                       >
-                        {route.completed_at
-                          ? 'Concluída'
-                          : route.status}
+                        {routeStatusLabel(route.status)}
                       </span>
                     </div>
 
@@ -2888,7 +2905,7 @@ function App() {
                         </span>
 
                         <strong>
-                          {route.status}
+                          {routeStatusLabel(route.status)}
                         </strong>
                       </div>
                     </div>
@@ -2919,7 +2936,7 @@ function App() {
           {view === 'history' &&
             historyView}
 
-          {view === 'route' && <MyRouteScreen />}
+          {view === 'route' && <MyRouteScreen onFinished={() => navigate('home')} />}
         </div>
       </section>
 

@@ -303,11 +303,20 @@ body {
   text-align: left;
 }
 
+/* Os 4 botões (Início/Meu perfil/Histórico/Minha rota) já compartilhavam
+   exatamente a mesma estrutura/CSS — a caixa do ícone já era idêntica pra
+   todos. O que fazia "Minha rota" parecer fora do eixo era o glifo em si
+   (▤ tem peso visual bem mais denso/preenchido que ⌂ ◯ ◷, que são todos
+   finos/vazados) — trocado por ⊙, mesma família visual dos outros três.
+   display:flex aqui é reforço estrutural: garante a centralização do
+   glifo dentro da caixa de 22px independente de peculiaridade de fonte. */
 .drawer-nav button span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 22px;
   color: var(--text-muted);
   font-size: 18px;
-  text-align: center;
 }
 
 .drawer-nav button:hover:not(:disabled) {
@@ -879,18 +888,11 @@ h2 {
   font-size: 18px;
 }
 
-.refresh-button {
-  width: auto;
-  min-height: 38px;
-  padding: 0 13px;
-  background: transparent;
-  border-color: var(--border);
-  color: var(--text);
+.history-sync-hint {
+  flex-shrink: 0;
+  color: var(--text-muted);
   font-size: 12px;
-}
-
-.refresh-button:hover:not(:disabled) {
-  background: var(--surface);
+  font-weight: 600;
 }
 
 .history-list {
@@ -1319,7 +1321,14 @@ button.secondary:hover:not(:disabled) {
   gap: 2px;
 }
 
+/* display:block é o que faltava aqui — sem isso, o <span> do label e o
+   <strong> do valor logo depois ficam na mesma linha (dois elementos
+   inline, sem quebra), grudados: "ENTREGAS REALIZADAS3". Usado em
+   AssignedRouteModal, DeliveryOfferModal e no resumo de rota concluída
+   (MyRouteScreen) — corrige os três de uma vez. */
 .offer-modal-label {
+  display: block;
+  margin-bottom: 2px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1719,6 +1728,12 @@ button.secondary {
 
 .route-summary-card {
   max-width: none;
+}
+
+/* Espaço entre a mensagem de sucesso e o botão "Voltar para o início"
+   (só existe no resumo pós-finalização) — sem isso o botão fica colado. */
+.route-summary-card > button {
+  margin-top: 14px;
 }
 
 .route-summary-grid {

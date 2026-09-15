@@ -151,6 +151,24 @@ export function deliveredCount(route: MyRoute): number {
   return route.stops.filter((s) => FINAL_STOP_STATUSES.has(s.status)).length
 }
 
+/**
+ * Duração real da execução (completed_at - started_at) quando ambos estão
+ * disponíveis — nunca troca silenciosamente por estimatedDurationS se já
+ * temos a duração real. Cai pro tempo estimado só quando a rota ainda não
+ * tem os dois timestamps (ex.: todas as paradas concluídas mas "Finalizar
+ * rota" ainda não foi tocado, então completedAt ainda é null).
+ */
+export function routeRealDurationS(route: MyRoute): number | null {
+  if (route.startedAt && route.completedAt) {
+    const start = new Date(route.startedAt).getTime()
+    const end = new Date(route.completedAt).getTime()
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return Math.round((end - start) / 1000)
+    }
+  }
+  return route.estimatedDurationS
+}
+
 export async function startMyRoute(routeId: string): Promise<void> {
   const { error } = await supabase.rpc('start_route_tx_as_driver', { _route_id: routeId })
   if (error) throw error
