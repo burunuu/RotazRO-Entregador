@@ -118,20 +118,24 @@ export function RouteStopCard({ stop, isNext, running, busy, onDeliver }: RouteS
       </div>
 
       <div className="route-stop-actions-grid">
-        {hasCoords && (
-          <a
-            className="button-like secondary"
-            href={singleStopMapsUrl(stop.latitude as number, stop.longitude as number)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Abrir no Maps
-          </a>
-        )}
-        {stop.phone && (
-          <a className="button-like secondary" href={`tel:${stop.phone}`}>
-            Ligar
-          </a>
+        {(hasCoords || stop.phone) && (
+          <div className="route-stop-actions-row">
+            {hasCoords && (
+              <a
+                className="button-like secondary"
+                href={singleStopMapsUrl(stop.latitude as number, stop.longitude as number)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Abrir no Maps
+              </a>
+            )}
+            {stop.phone && (
+              <a className="button-like secondary" href={`tel:${stop.phone}`}>
+                Ligar
+              </a>
+            )}
+          </div>
         )}
         {!closed && (
           <button

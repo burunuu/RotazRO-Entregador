@@ -40,10 +40,15 @@ export function OccurrenceSheet({ open, stops, busy, error, onClose, onConfirm }
 
   return (
     <div className="offer-modal-backdrop" role="presentation">
-      <section className="occurrence-sheet" role="dialog" aria-modal="true" aria-label="Registrar ocorrência">
+      <section className="occurrence-sheet card" role="dialog" aria-modal="true" aria-label="Registrar ocorrência">
         <div className="occurrence-sheet-header">
-          <h2>{picking ? 'Qual entrega teve problema?' : 'Registrar ocorrência'}</h2>
-          {!picking && selected && <p className="occurrence-sheet-subtitle">{selected.customerName}</p>}
+          <h2>Registrar ocorrência</h2>
+          {picking && <p className="occurrence-sheet-subtitle">Selecione a entrega com problema.</p>}
+          {!picking && selected && (
+            <p className="occurrence-sheet-subtitle">
+              Entrega: #{selected.position} {selected.customerName}
+            </p>
+          )}
           <button type="button" className="occurrence-sheet-close" onClick={onClose} aria-label="Fechar">
             ×
           </button>
@@ -99,7 +104,7 @@ export function OccurrenceSheet({ open, stops, busy, error, onClose, onConfirm }
 
             <button
               type="button"
-              className="button-warning"
+              className="button-accent occurrence-sheet-confirm"
               disabled={busy}
               onClick={() => selectedId && onConfirm(selectedId, occurrenceType, note)}
             >

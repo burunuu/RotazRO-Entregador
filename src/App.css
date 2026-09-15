@@ -1155,6 +1155,9 @@ input:disabled {
    ========================================================= */
 
 button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-height: 50px;
   padding: 0 18px;
@@ -1165,6 +1168,7 @@ button {
   font: inherit;
   font-size: 14px;
   font-weight: 700;
+  line-height: 1.2;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -1361,7 +1365,7 @@ button.secondary:hover:not(:disabled) {
   align-items: flex-end;
   justify-content: center;
   padding: 16px;
-  background: rgba(32, 32, 32, 0.55);
+  background: rgba(18, 16, 14, 0.62);
 }
 
 @media (min-width: 640px) {
@@ -1453,38 +1457,16 @@ button.secondary:hover:not(:disabled) {
   gap: 14px;
 }
 
-.route-stop-card .route-stop-address {
-  font-size: 15px;
-  margin-top: 2px;
-}
-
-.route-stop-neighborhood {
-  color: var(--text-muted);
-  font-size: 13px;
-  margin-top: -4px;
-}
-
-.route-stop-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.route-stop-actions > .button-like,
-.route-stop-actions > button {
-  flex: 1;
-  min-width: 120px;
-  text-align: center;
-}
-
 a.button-like {
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px 14px;
   border-radius: var(--radius-sm);
   text-decoration: none;
   font-weight: 600;
   font-size: 14px;
+  line-height: 1.2;
 }
 
 a.button-like.secondary,
@@ -1492,35 +1474,6 @@ button.secondary {
   background: var(--surface-soft);
   color: var(--text);
   border: 1px solid var(--border);
-}
-
-.occurrence-panel {
-  margin-top: 12px;
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-soft);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.occurrence-panel label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.occurrence-panel select,
-.occurrence-panel textarea {
-  font: inherit;
-  padding: 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
 }
 
 /* =========================================================
@@ -1579,14 +1532,20 @@ button.secondary {
   margin-top: 18px;
 }
 
+/* max-width:none sobrescreve o limite de 520px herdado de .card — sem
+   isso, este card fica mais estreito que a lista de paradas/botão de
+   rota completa, que não usam .card e ocupam a largura toda. */
 .route-departure-card {
+  max-width: none;
   padding: 16px;
+  text-align: center;
 }
 
 .route-departure-title {
   margin: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   font-weight: 700;
   color: var(--text);
@@ -1631,6 +1590,7 @@ button.secondary {
 }
 
 .route-next-highlight {
+  max-width: none;
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   padding: 16px;
@@ -1739,20 +1699,20 @@ button.secondary {
 }
 
 .route-stop-occurrence-label {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--warning-strong);
 }
 
 .route-stop-address {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   font-size: 13.5px;
   color: var(--text-muted);
 }
 
 .route-stop-phone {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   font-size: 13.5px;
   color: var(--text-muted);
 }
@@ -1768,7 +1728,7 @@ button.secondary {
 }
 
 .route-stop-notes {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   font-size: 13px;
   color: var(--text-muted);
 }
@@ -1798,37 +1758,37 @@ button.secondary {
 }
 
 .route-stop-execution-note {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   font-size: 13px;
   color: var(--text);
 }
 
+/* Duas linhas fixas: Maps/Ligar dividem a linha de cima; Entregue
+   sempre ocupa a linha de baixo inteira (independente de quantos
+   botões existem em cima) — evita o botão de entregar ficar torto
+   ou com meia largura quando sobra sozinho. */
 .route-stop-actions-grid {
   margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.route-stop-actions-grid > a.button-like,
-.route-stop-actions-grid > button {
+.route-stop-actions-row {
+  display: flex;
+  gap: 8px;
+}
+
+.route-stop-actions-row > a.button-like {
+  flex: 1;
   min-height: 44px;
   font-size: 13px;
   padding: 0 10px;
 }
 
-/* Com só 3 ações (Maps/Ligar/Entregue), a última fica sozinha na
-   grade de 2 colunas — estica pra linha toda em vez de ficar
-   desalinhada à esquerda ocupando meia largura. */
-.route-stop-actions-grid > :last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-}
-
-.route-stop-problem-toggle {
-  margin-top: 8px;
-  border-color: var(--warning);
-  color: var(--warning-strong);
-  background: var(--warning-bg);
+.route-stop-actions-grid > button.button-accent {
+  min-height: 44px;
+  font-size: 13px;
 }
 
 .button-warning {
@@ -1845,6 +1805,10 @@ button.secondary {
   color: var(--text);
   font-weight: 600;
   text-align: center;
+}
+
+.route-summary-card {
+  max-width: none;
 }
 
 .route-summary-grid {
@@ -2023,6 +1987,10 @@ button.secondary {
    OCORRÊNCIA — ação única no fim da lista (bottom sheet)
    ========================================================= */
 
+/* Fundo/borda/sombra vêm da classe .card (aplicada junto no JSX) —
+   sem ela o sheet fica transparente sobre o backdrop, sem separação
+   visual da tela de trás. max-width aqui (460px) sobrescreve o
+   520px de .card por ordem de declaração no arquivo. */
 .occurrence-sheet {
   width: 100%;
   max-width: 460px;
@@ -2053,10 +2021,10 @@ button.secondary {
 
 .occurrence-sheet-close {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 32px;
-  height: 32px;
+  top: -8px;
+  right: -8px;
+  width: 40px;
+  height: 40px;
   min-height: 0;
   border-radius: 999px;
   background: var(--surface-soft);
@@ -2076,7 +2044,7 @@ button.secondary {
 
 .occurrence-sheet-list-item {
   width: 100%;
-  min-height: 0;
+  min-height: 56px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2135,7 +2103,7 @@ button.secondary {
   color: var(--text);
 }
 
-.occurrence-sheet button.button-warning {
+.occurrence-sheet-confirm {
   margin-top: 14px;
 }
 

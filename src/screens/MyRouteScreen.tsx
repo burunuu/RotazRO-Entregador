@@ -142,7 +142,7 @@ export function MyRouteScreen() {
             <p className="route-next-address">{next.address}</p>
             {next.latitude != null && next.longitude != null && (
               <a
-                className="button-like"
+                className="button-like button-accent"
                 href={singleStopMapsUrl(next.latitude, next.longitude)}
                 target="_blank"
                 rel="noreferrer"
