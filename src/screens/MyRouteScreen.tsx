@@ -41,13 +41,19 @@ export function MyRouteScreen() {
 
   const route = currentRoute.route
 
+  // route_stops.status é a fonte da verdade de pendência (delivered/failed/
+  // skipped fecham a parada) — a rota completa no Maps nunca pode incluir
+  // paradas já fechadas, senão reabre destinos já resolvidos. A ordem
+  // (position) das restantes é preservada, sem reotimizar.
+  const pendingStopsForMaps = useMemo(() => route?.stops.filter((s) => s.status === 'pending') ?? [], [route])
+
   const fullLinks = useMemo(() => {
     if (!route || route.baseLatitude == null || route.baseLongitude == null) return []
     return fullRouteUrls(
       { latitude: route.baseLatitude, longitude: route.baseLongitude },
-      route.stops.map((s) => ({ latitude: s.latitude, longitude: s.longitude })),
+      pendingStopsForMaps.map((s) => ({ latitude: s.latitude, longitude: s.longitude })),
     )
-  }, [route])
+  }, [route, pendingStopsForMaps])
 
   if (currentRoute.loading && !route) {
     return (
@@ -71,8 +77,14 @@ export function MyRouteScreen() {
     )
   }
 
-  const delivered = deliveredCount(route)
+  // "concluded" agrega delivered+failed+skipped — usado só para a barra de
+  // progresso e o recap final (uma parada com ocorrência também "andou" a
+  // rota). Para o summary do topo, "entregues" precisa ser só delivered de
+  // verdade, senão uma ocorrência é contada como entrega.
+  const concluded = deliveredCount(route)
+  const delivered = route.stops.filter((s) => s.status === 'delivered').length
   const failed = route.stops.filter((s) => s.status === 'failed').length
+  const pending = route.stops.filter((s) => s.status === 'pending').length
   const total = route.stops.length
   const next = nextPendingStop(route)
   const running = route.status === 'in_progress'
@@ -80,27 +92,33 @@ export function MyRouteScreen() {
 
   return (
     <div className="my-route-screen">
-      <header className="route-header">
-        <p className="route-header-kicker">EXECUÇÃO</p>
-        <h1>Rota de hoje</h1>
-        <p className="route-header-driver">{route.organizationName}</p>
-        <p className="route-header-summary">
-          {total} paradas · {delivered} entregues
-          {failed > 0 ? ` · ${failed} ${failed === 1 ? 'ocorrência' : 'ocorrências'}` : ''} ·{' '}
-          {total - delivered - failed} pendentes
-        </p>
-        <p className="route-status-label">{STATUS_LABEL[route.status] ?? route.status}</p>
-      </header>
-
       <div className="my-route-body">
-        {running && <RouteProgress delivered={delivered} total={total} />}
-
-        <section className="card route-departure-card">
-          <p className="route-departure-title">Saída: {route.baseName ?? 'Matriz'}</p>
-          <p className="route-departure-meta">
-            {total} entregas • {formatKm(route.totalDistanceM)} • {formatMinutes(route.estimatedDurationS)}
+        {/* Summary compacto: total/entregues/pendentes + km/tempo, tudo
+            centralizado — substitui o header grande (EXECUÇÃO/Rota de
+            hoje/nome do restaurante) e o card "Saída:" separado. */}
+        <section className="card route-top-summary">
+          {running && <span className="route-status-label">{STATUS_LABEL[route.status] ?? route.status}</span>}
+          <div className="route-top-summary-stats">
+            <div className="route-top-summary-stat">
+              <strong>{total}</strong>
+              <span>{total === 1 ? 'entrega' : 'entregas'}</span>
+            </div>
+            <div className="route-top-summary-stat">
+              <strong>{delivered}</strong>
+              <span>{delivered === 1 ? 'entregue' : 'entregues'}</span>
+            </div>
+            <div className="route-top-summary-stat">
+              <strong>{pending}</strong>
+              <span>pendentes</span>
+            </div>
+          </div>
+          <p className="route-top-summary-meta">
+            {formatKm(route.totalDistanceM)} • {formatMinutes(route.estimatedDurationS)}
+            {failed > 0 ? ` • ${failed} ${failed === 1 ? 'ocorrência' : 'ocorrências'}` : ''}
           </p>
         </section>
+
+        {running && <RouteProgress delivered={concluded} total={total} />}
 
         {currentRoute.error && <div className="error">{currentRoute.error}</div>}
 
@@ -190,7 +208,7 @@ export function MyRouteScreen() {
             <div className="route-summary-grid">
               <div>
                 <span className="offer-modal-label">Entregas realizadas</span>
-                <strong>{delivered}</strong>
+                <strong>{concluded}</strong>
               </div>
               <div>
                 <span className="offer-modal-label">Distância</span>

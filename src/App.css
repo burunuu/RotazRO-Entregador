@@ -24,10 +24,6 @@
   --warning-bg: #fbeed4;
   --warning-strong: #7a4f08;
 
-  --sidebar: #24252c;
-  --sidebar-foreground: #f2ede2;
-  --sidebar-muted: rgba(242, 237, 226, 0.65);
-
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -1477,83 +1473,56 @@ button.secondary {
 }
 
 /* =========================================================
-   MINHA ROTA — cabeçalho escuro, saída, rota completa, lista
-   Paridade visual com o portal Web do entregador (e.$token.tsx).
+   MINHA ROTA — summary compacto, rota completa, lista
    ========================================================= */
-
-.route-header {
-  margin: -28px max(-18px, calc(-1 * env(safe-area-inset-right))) 0
-    max(-18px, calc(-1 * env(safe-area-inset-left)));
-  padding: max(20px, env(safe-area-inset-top)) 20px 22px;
-  background: var(--sidebar);
-  color: var(--sidebar-foreground);
-  border-bottom-left-radius: var(--radius-lg);
-  border-bottom-right-radius: var(--radius-lg);
-}
-
-.route-header-kicker {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.route-header h1 {
-  margin: 4px 0 0;
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--sidebar-foreground);
-}
-
-.route-header-driver {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--sidebar-muted);
-}
-
-.route-header-summary {
-  margin: 12px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--sidebar-foreground);
-}
-
-.route-header .route-status-label {
-  background: rgba(242, 237, 226, 0.14);
-  color: var(--sidebar-foreground);
-}
 
 .my-route-body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  margin-top: 18px;
+  margin-top: 4px;
 }
 
-/* max-width:none sobrescreve o limite de 520px herdado de .card — sem
-   isso, este card fica mais estreito que a lista de paradas/botão de
-   rota completa, que não usam .card e ocupam a largura toda. */
-.route-departure-card {
+/* Summary único no topo (substitui o antigo header escuro + o card
+   "Saída:" separado): total/entregues/pendentes + km/tempo, centralizado,
+   compacto. max-width:none sobrescreve o limite de 520px herdado de .card
+   — sem isso, este card fica mais estreito que a lista de paradas/botão
+   de rota completa, que não usam .card e ocupam a largura toda. */
+.route-top-summary {
   max-width: none;
-  padding: 16px;
+  padding: 18px;
   text-align: center;
 }
 
-.route-departure-title {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-weight: 700;
-  color: var(--text);
-  font-size: 15px;
+.route-top-summary .route-status-label {
+  margin-bottom: 10px;
 }
 
-.route-departure-meta {
-  margin: 4px 0 0;
+.route-top-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.route-top-summary-stat strong {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.route-top-summary-stat span {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.route-top-summary-meta {
+  margin: 10px 0 0;
   font-size: 13px;
   color: var(--text-muted);
 }
@@ -1656,14 +1625,20 @@ button.secondary {
   background: var(--warning-bg);
 }
 
+/* grid de 3 colunas (badge | conteúdo | espelho vazio do badge) em vez de
+   flex-row: assim o badge não desloca o bloco de conteúdo para a direita —
+   a coluna do meio fica geometricamente centralizada no card, porque as
+   duas bordas (26px + 10px de gap) são iguais dos dois lados. Nenhuma
+   margem "mágica" — é estrutural e escala com qualquer largura de tela. */
 .route-stop-top {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 26px 1fr 26px;
+  align-items: start;
   gap: 10px;
 }
 
 .route-stop-badge {
-  flex-shrink: 0;
+  grid-column: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1687,8 +1662,8 @@ button.secondary {
 }
 
 .route-stop-main {
+  grid-column: 2;
   min-width: 0;
-  flex: 1;
 }
 
 .route-stop-main h3 {
