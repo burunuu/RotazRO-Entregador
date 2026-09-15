@@ -16,6 +16,8 @@ export type PendingOffer = {
   stopsCount: number | null
   routeDistanceM: number | null
   routeDurationS: number | null
+  /** Bairros das entregas — informação de região, nunca endereço completo. */
+  neighborhoods: string[]
 }
 
 /**
@@ -40,10 +42,13 @@ export async function fetchPendingOffer(): Promise<PendingOffer | null> {
   // no cliente; o próximo dispatch do restaurante vai formalizar a expiração.
   if (new Date(offer.expires_at).getTime() <= Date.now()) return null
 
+  // route_stops(orders(neighborhood)) — só o bairro, nunca endereço/nome/
+  // telefone/pedido. Bairro sozinho não identifica o cliente, então é
+  // seguro mostrar antes do aceite (dá uma noção de região ao entregador).
   const { data: route } = await supabase
     .from('routes')
     .select(
-      'total_distance_m, estimated_duration_s, organizations:organization_id (name), bases:base_id (address), route_stops (id)',
+      'total_distance_m, estimated_duration_s, organizations:organization_id (name), bases:base_id (address), route_stops (id, orders:order_id (neighborhood))',
     )
     .eq('id', offer.route_id)
     .maybeSingle()
@@ -53,8 +58,16 @@ export async function fetchPendingOffer(): Promise<PendingOffer | null> {
     estimated_duration_s: number | null
     organizations: { name: string } | null
     bases: { address: string } | null
-    route_stops: { id: string }[] | null
+    route_stops: { id: string; orders: { neighborhood: string | null } | null }[] | null
   } | null
+
+  const neighborhoods = Array.from(
+    new Set(
+      (routeData?.route_stops ?? [])
+        .map((s) => s.orders?.neighborhood?.trim())
+        .filter((n): n is string => Boolean(n)),
+    ),
+  )
 
   return {
     id: offer.id,
@@ -69,6 +82,7 @@ export async function fetchPendingOffer(): Promise<PendingOffer | null> {
     stopsCount: routeData?.route_stops?.length ?? null,
     routeDistanceM: routeData?.total_distance_m ?? null,
     routeDurationS: routeData?.estimated_duration_s ?? null,
+    neighborhoods,
   }
 }
 

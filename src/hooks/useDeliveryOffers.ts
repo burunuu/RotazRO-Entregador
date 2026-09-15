@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { acceptOffer, declineOffer, fetchPendingOffer, type PendingOffer } from '../services/dispatch'
+import { describeError } from '../services/error-helpers'
 
 /**
  * Fallback de polling (5s) para a oferta pendente do entregador, usado
@@ -72,7 +73,7 @@ export function useDeliveryOffers(enabled: boolean) {
       setOffer(null)
       return routeId
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível aceitar a entrega.')
+      setError(describeError(err, 'ACEITAR_OFERTA', 'Não foi possível aceitar a entrega.'))
       // Sempre refaz o fetch em vez de confiar no estado local: a oferta
       // pode já ter sido aceita por outro entregador ou expirado.
       setOffer(await fetchPendingOffer().catch(() => null))
@@ -90,7 +91,7 @@ export function useDeliveryOffers(enabled: boolean) {
       await declineOffer(offer.id)
       setOffer(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível recusar a entrega.')
+      setError(describeError(err, 'RECUSAR_OFERTA', 'Não foi possível recusar a entrega.'))
     } finally {
       setBusy(false)
     }

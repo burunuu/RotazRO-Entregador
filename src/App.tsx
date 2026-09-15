@@ -8,7 +8,10 @@ import { ensureDriverProfile } from './services/driver-identity'
 import { updateMyPresence } from './services/presence'
 import { registerForPush, onNotificationOpened, unregisterPush } from './services/notifications'
 import { useDeliveryOffers } from './hooks/useDeliveryOffers'
+import { useAssignedRoute } from './hooks/useAssignedRoute'
 import { DeliveryOfferModal } from './components/DeliveryOfferModal'
+import { AssignedRouteModal } from './components/AssignedRouteModal'
+import { AssignedRouteCard } from './components/AssignedRouteCard'
 import { MyRouteScreen } from './screens/MyRouteScreen'
 import './App.css'
 
@@ -417,8 +420,17 @@ function App() {
   // DESPACHO REGIONAL
   // =========================================================
   // Chamado incondicionalmente (regra dos hooks) mesmo antes do login —
-  // fica inerte (enabled=false) enquanto não há sessão/tracking.
+  // fica inerte (enabled=false) enquanto não há sessão/tracking. Gated por
+  // `tracking` (não só `authenticated`) porque dispatch_route_regional só
+  // considera drivers com driver_presence.status='online', que só é
+  // setado ao iniciar o trabalho (ver sendLocationToSupabase) — não faria
+  // sentido fazer polling de oferta antes disso, nunca haveria nada.
   const deliveryOffers = useDeliveryOffers(authenticated && tracking)
+
+  // Detecção de rota atribuída diretamente pelo restaurante ("entregador
+  // da loja") ou já aceita via oferta regional — independente de
+  // `tracking`, porque a atribuição não depende de presence/GPS.
+  const assignedRoute = useAssignedRoute(authenticated)
 
   useEffect(() => {
     if (!authenticated || !driver) return
@@ -2003,45 +2015,13 @@ function App() {
         </div>
       </section>
 
-      <section className="day-info-card">
-        <div className="day-info-main">
-          <small>AGORA</small>
-
-          <strong>
-            {formatLongDate(
-              currentDateTime,
-            )}
-          </strong>
-
-          <span>
-            {formatClock(
-              currentDateTime,
-            )}
-          </span>
-        </div>
-
-        <div className="weather-display">
-          <span className="weather-icon">
-            ☀
-          </span>
-
-          <div>
-            <strong>
-              {temperature != null
-                ? `${Math.round(
-                    temperature,
-                  )}°C`
-                : weatherLoading
-                  ? '...'
-                  : '—'}
-            </strong>
-
-            <small>
-              Temperatura local
-            </small>
-          </div>
-        </div>
-      </section>
+      {assignedRoute.route && (
+        <AssignedRouteCard
+          route={assignedRoute.route}
+          nextStop={assignedRoute.nextStop}
+          onOpen={() => navigate('route')}
+        />
+      )}
 
       {gpsError && (
         <div className="error">
@@ -2176,6 +2156,46 @@ function App() {
               : 'Encerrar trabalho'}
           </button>
         )}
+      </section>
+
+      <section className="day-info-card home-secondary">
+        <div className="day-info-main">
+          <small>AGORA</small>
+
+          <strong>
+            {formatLongDate(
+              currentDateTime,
+            )}
+          </strong>
+
+          <span>
+            {formatClock(
+              currentDateTime,
+            )}
+          </span>
+        </div>
+
+        <div className="weather-display">
+          <span className="weather-icon">
+            ☀
+          </span>
+
+          <div>
+            <strong>
+              {temperature != null
+                ? `${Math.round(
+                    temperature,
+                  )}°C`
+                : weatherLoading
+                  ? '...'
+                  : '—'}
+            </strong>
+
+            <small>
+              Temperatura local
+            </small>
+          </div>
+        </div>
       </section>
 
       <section className="section-block">
@@ -2946,6 +2966,17 @@ function App() {
             })
           }}
           onDecline={() => void deliveryOffers.decline()}
+        />
+      )}
+
+      {!deliveryOffers.offer && assignedRoute.showPopup && assignedRoute.route && (
+        <AssignedRouteModal
+          route={assignedRoute.route}
+          onViewRoute={() => {
+            assignedRoute.dismissPopup()
+            navigate('route')
+          }}
+          onLater={() => assignedRoute.dismissPopup()}
         />
       )}
     </main>

@@ -28,8 +28,11 @@ export type MyRoute = {
   organizationName: string
   baseName: string | null
   baseAddress: string | null
+  baseLatitude: number | null
+  baseLongitude: number | null
   totalDistanceM: number | null
   estimatedDurationS: number | null
+  createdAt: string
   startedAt: string | null
   completedAt: string | null
   stops: MyRouteStop[]
@@ -46,7 +49,7 @@ export async function fetchMyActiveRoute(): Promise<MyRoute | null> {
   const { data: route, error } = await supabase
     .from('routes')
     .select(
-      'id, status, total_distance_m, estimated_duration_s, started_at, completed_at, organizations:organization_id (name), bases:base_id (name, address)',
+      'id, status, total_distance_m, estimated_duration_s, created_at, started_at, completed_at, organizations:organization_id (name), bases:base_id (name, address, latitude, longitude)',
     )
     .in('status', ['confirmed', 'in_progress'])
     .order('created_at', { ascending: false })
@@ -71,10 +74,11 @@ export async function fetchMyActiveRoute(): Promise<MyRoute | null> {
     status: string
     total_distance_m: number | null
     estimated_duration_s: number | null
+    created_at: string
     started_at: string | null
     completed_at: string | null
     organizations: { name: string } | null
-    bases: { name: string; address: string } | null
+    bases: { name: string; address: string; latitude: number | null; longitude: number | null } | null
   }
 
   return {
@@ -83,6 +87,9 @@ export async function fetchMyActiveRoute(): Promise<MyRoute | null> {
     organizationName: routeRow.organizations?.name ?? 'Restaurante',
     baseName: routeRow.bases?.name ?? null,
     baseAddress: routeRow.bases?.address ?? null,
+    baseLatitude: routeRow.bases?.latitude ?? null,
+    baseLongitude: routeRow.bases?.longitude ?? null,
+    createdAt: routeRow.created_at,
     totalDistanceM: routeRow.total_distance_m,
     estimatedDurationS: routeRow.estimated_duration_s,
     startedAt: routeRow.started_at,

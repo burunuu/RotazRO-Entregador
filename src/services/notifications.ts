@@ -13,6 +13,18 @@ import { supabase } from '../lib/supabase'
  * só serve para RECEBER, nunca para enviar).
  */
 
+/**
+ * Este build NÃO tem google-services.json (Firebase ainda não configurado
+ * manualmente — ver relatório de handoff). Chamar qualquer API nativa de
+ * push (checkPermissions/requestPermissions/register) sem o FirebaseApp
+ * inicializado pode lançar uma IllegalStateException dentro do SDK do
+ * Firebase em uma thread nativa fora do alcance de qualquer try/catch em
+ * JavaScript — derrubando o app inteiro (crash nativo, não capturável).
+ * Mantém a flag central aqui: assim que google-services.json existir no
+ * projeto, troque para true — nenhuma outra mudança de código é necessária.
+ */
+const PUSH_NOTIFICATIONS_ENABLED = false
+
 let listenersRegistered = false
 let currentPushToken: string | null = null
 
@@ -45,7 +57,7 @@ async function revokeDeviceToken(token: string) {
  * funcionando com o fallback de polling.
  */
 export async function registerForPush(driverProfileId: string): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return
+  if (!Capacitor.isNativePlatform() || !PUSH_NOTIFICATIONS_ENABLED) return
 
   try {
     const permission = await PushNotifications.checkPermissions()
@@ -84,7 +96,7 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
  * aparece corretamente porque o estado é sempre refeito do banco.
  */
 export function onNotificationOpened(handler: (offerId: string | null) => void): () => void {
-  if (!Capacitor.isNativePlatform()) return () => {}
+  if (!Capacitor.isNativePlatform() || !PUSH_NOTIFICATIONS_ENABLED) return () => {}
 
   const localHandler = (notification: PushNotificationSchema) => {
     const offerId = (notification.data as Record<string, unknown> | undefined)?.['offer_id']
@@ -108,7 +120,7 @@ export function onNotificationOpened(handler: (offerId: string | null) => void):
  * causa de push.
  */
 export async function unregisterPush(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return
+  if (!Capacitor.isNativePlatform() || !PUSH_NOTIFICATIONS_ENABLED) return
   try {
     await revokeCurrentDeviceToken(currentPushToken)
     currentPushToken = null

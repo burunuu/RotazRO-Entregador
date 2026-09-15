@@ -20,6 +20,14 @@
   --danger: #a32929;
   --danger-bg: #feecec;
 
+  --warning: #b5790f;
+  --warning-bg: #fbeed4;
+  --warning-strong: #7a4f08;
+
+  --sidebar: #24252c;
+  --sidebar-foreground: #f2ede2;
+  --sidebar-muted: rgba(242, 237, 226, 0.65);
+
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -1515,9 +1523,460 @@ button.secondary {
   color: var(--text);
 }
 
+/* =========================================================
+   MINHA ROTA — cabeçalho escuro, saída, rota completa, lista
+   Paridade visual com o portal Web do entregador (e.$token.tsx).
+   ========================================================= */
+
+.route-header {
+  margin: -28px max(-18px, calc(-1 * env(safe-area-inset-right))) 0
+    max(-18px, calc(-1 * env(safe-area-inset-left)));
+  padding: max(20px, env(safe-area-inset-top)) 20px 22px;
+  background: var(--sidebar);
+  color: var(--sidebar-foreground);
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+
+.route-header-kicker {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.route-header h1 {
+  margin: 4px 0 0;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--sidebar-foreground);
+}
+
+.route-header-driver {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--sidebar-muted);
+}
+
+.route-header-summary {
+  margin: 12px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sidebar-foreground);
+}
+
+.route-header .route-status-label {
+  background: rgba(242, 237, 226, 0.14);
+  color: var(--sidebar-foreground);
+}
+
+.my-route-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.route-departure-card {
+  padding: 16px;
+}
+
+.route-departure-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.route-departure-meta {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.route-full-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.button-outline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--accent);
+  color: var(--accent-dark);
+  background: transparent;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+}
+
+.route-full-links-warning {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--warning);
+  background: var(--warning-bg);
+  color: var(--warning-strong);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.route-next-highlight {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 16px;
+}
+
+.route-next-kicker {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-dark);
+}
+
+.route-next-name {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.route-next-address {
+  margin: 2px 0 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.route-next-highlight > a.button-like {
+  width: 100%;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.route-stop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.route-stop-card {
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.route-stop-card--next {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.route-stop-card--done {
+  opacity: 0.68;
+}
+
+.route-stop-card--warning {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.route-stop-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.route-stop-badge {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+}
+
+.route-stop-badge.done {
+  background: var(--surface-strong);
+  color: var(--text-muted);
+}
+
+.route-stop-badge.warning {
+  background: var(--warning);
+  color: #fff;
+}
+
+.route-stop-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.route-stop-main h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.route-stop-occurrence-label {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warning-strong);
+}
+
+.route-stop-address {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.route-stop-phone {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.route-stop-order-block {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+.route-stop-notes {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.route-stop-payment {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.route-stop-payment > div {
+  display: flex;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.route-stop-payment dt {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.route-stop-payment dd {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.route-stop-execution-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.route-stop-actions-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.route-stop-actions-grid > a.button-like,
+.route-stop-actions-grid > button {
+  min-height: 44px;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.route-stop-problem-toggle {
+  margin-top: 8px;
+  border-color: var(--warning);
+  color: var(--warning-strong);
+  background: var(--warning-bg);
+}
+
+.button-warning {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: #fff;
+}
+
+.route-finished-message {
+  margin: 10px 0 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--success-soft);
+  color: var(--text);
+  font-weight: 600;
+  text-align: center;
+}
+
 .route-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin: 10px 0;
+}
+
+/* =========================================================
+   SWIPE PARA ACEITAR OFERTA REGIONAL
+   ========================================================= */
+
+.offer-swipe-row {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.offer-decline-button {
+  width: auto;
+  min-width: 92px;
+  flex: 0 0 auto;
+  background: var(--danger-bg);
+  border-color: var(--danger-bg);
+  color: var(--danger);
+}
+
+.offer-swipe-track {
+  position: relative;
+  flex: 1;
+  min-height: 54px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  touch-action: pan-y;
+}
+
+.offer-swipe-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-soft);
+  transition: width 60ms linear;
+}
+
+.offer-swipe-track.armed .offer-swipe-fill {
+  background: var(--success-soft);
+}
+
+.offer-swipe-label {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.offer-swipe-track.armed .offer-swipe-label {
+  color: var(--success);
+}
+
+.offer-swipe-handle {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: grab;
+  touch-action: none;
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(32, 32, 32, 0.25);
+}
+
+.offer-swipe-track.armed .offer-swipe-handle {
+  background: var(--success);
+}
+
+.offer-accept-fallback {
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+/* =========================================================
+   HOME — ROTA ATRIBUÍDA (loja ou regional)
+   ========================================================= */
+
+.assigned-route-card {
+  padding: 18px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.assigned-route-card--running {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+
+.assigned-route-org {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.assigned-route-meta {
+  margin: 2px 0 14px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.assigned-route-progress {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.assigned-route-next {
+  margin: 2px 0 14px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.home-secondary {
+  margin-top: 18px;
+  opacity: 0.92;
 }
