@@ -1,15 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
+import { supabase } from '../lib/supabase'
 import { acceptOffer, declineOffer, fetchPendingOffer, type PendingOffer } from '../services/dispatch'
 import { describeError } from '../services/error-helpers'
 
 /**
- * Fallback de polling (5s) para a oferta pendente do entregador, usado
- * enquanto o app está em primeiro plano e o entregador está online — o
- * push é o caminho principal, isto é redundância para quando o app já
- * está aberto ou o push atrasa. Para de fazer polling assim que `enabled`
- * vira falso (offline, logout, ou já em rota).
+ * Realtime é o caminho principal pra notar uma oferta nova (a loja clica
+ * "buscar entregador" -> dispatch_route_regional insere a offer -> o
+ * evento chega em ~instantes, sem esperar nenhum poll). O polling de 5s
+ * continua existindo como rede de segurança — mesma arquitetura
+ * "Realtime + poll fallback" já usada em useCurrentRoute.ts pra execução
+ * de rota — cobre o socket cair silenciosamente, e continua sendo também
+ * o que fecha o loop quando o push (desligado nesta build) atrasaria.
+ * RLS ("driver reads own offers") já restringe o que cada assinatura
+ * recebe — sem filtro explícito de driver_profile_id porque o cliente não
+ * conhece esse id localmente, e não precisa: Realtime aplica a mesma RLS
+ * da leitura normal por assinante.
  */
 const POLL_MS = 5000
+const REALTIME_DEBOUNCE_MS = 250
 
 export function useDeliveryOffers(enabled: boolean) {
   const [offer, setOffer] = useState<PendingOffer | null>(null)
@@ -33,6 +41,7 @@ export function useDeliveryOffers(enabled: boolean) {
     }
 
     let cancelled = false
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
     async function poll() {
       try {
@@ -48,15 +57,30 @@ export function useDeliveryOffers(enabled: boolean) {
       }
     }
 
+    function scheduleImmediatePoll() {
+      if (cancelled) return
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        if (!cancelled) void poll()
+      }, REALTIME_DEBOUNCE_MS)
+    }
+
     pollNow.current = () => void poll()
     void poll()
     timer.current = setInterval(() => void poll(), POLL_MS)
+
+    const channel = supabase
+      .channel('delivery-offers-mine')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_offers' }, scheduleImmediatePoll)
+      .subscribe()
 
     return () => {
       cancelled = true
       pollNow.current = () => {}
       if (timer.current) clearInterval(timer.current)
       timer.current = null
+      if (debounceTimer) clearTimeout(debounceTimer)
+      void supabase.removeChannel(channel)
     }
   }, [enabled])
 

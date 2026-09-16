@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PendingOffer } from '../services/dispatch'
 
 function km(meters: number | null): string {
@@ -12,6 +12,71 @@ function minutes(seconds: number | null): string {
 }
 
 const ACCEPT_THRESHOLD = 0.72
+
+const TIMER_SIZE = 72
+const TIMER_STROKE = 6
+const TIMER_RADIUS = (TIMER_SIZE - TIMER_STROKE) / 2
+const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS
+/** Abaixo disso o anel muda de cor — reforço visual extra pro entregador perceber que o tempo está acabando. */
+const TIMER_DANGER_SECONDS = 10
+
+/**
+ * Timer circular bem visível: o anel "consome" (o traço encolhe) conforme
+ * o prazo passa, com o número de segundos restante no centro. A duração
+ * total é sempre calculada de expiresAt - offeredAt (não um valor fixo de
+ * 30s hardcoded) — se o timeout do backend mudar, o anel continua correto
+ * sem precisar tocar neste componente.
+ */
+function OfferCountdownRing({ offeredAt, expiresAt }: { offeredAt: string; expiresAt: string }) {
+  const totalMs = useMemo(
+    () => Math.max(1, new Date(expiresAt).getTime() - new Date(offeredAt).getTime()),
+    [offeredAt, expiresAt],
+  )
+  const [msLeft, setMsLeft] = useState(() => Math.max(0, new Date(expiresAt).getTime() - Date.now()))
+
+  useEffect(() => {
+    const tick = () => setMsLeft(Math.max(0, new Date(expiresAt).getTime() - Date.now()))
+    tick()
+    const id = setInterval(tick, 200)
+    return () => clearInterval(id)
+  }, [expiresAt])
+
+  const secondsLeft = Math.ceil(msLeft / 1000)
+  const fraction = Math.max(0, Math.min(1, msLeft / totalMs))
+  const danger = secondsLeft <= TIMER_DANGER_SECONDS
+
+  return (
+    <div
+      className={`offer-timer ${danger ? 'danger' : ''}`}
+      role="timer"
+      aria-live="polite"
+      aria-label={`Oferta expira em ${secondsLeft} segundos`}
+    >
+      <svg viewBox={`0 0 ${TIMER_SIZE} ${TIMER_SIZE}`} width={TIMER_SIZE} height={TIMER_SIZE}>
+        <circle
+          className="offer-timer-track"
+          cx={TIMER_SIZE / 2}
+          cy={TIMER_SIZE / 2}
+          r={TIMER_RADIUS}
+          strokeWidth={TIMER_STROKE}
+          fill="none"
+        />
+        <circle
+          className="offer-timer-arc"
+          cx={TIMER_SIZE / 2}
+          cy={TIMER_SIZE / 2}
+          r={TIMER_RADIUS}
+          strokeWidth={TIMER_STROKE}
+          fill="none"
+          strokeDasharray={TIMER_CIRCUMFERENCE}
+          strokeDashoffset={TIMER_CIRCUMFERENCE * (1 - fraction)}
+          transform={`rotate(-90 ${TIMER_SIZE / 2} ${TIMER_SIZE / 2})`}
+        />
+      </svg>
+      <span className="offer-timer-value">{secondsLeft}</span>
+    </div>
+  )
+}
 
 type DeliveryOfferModalProps = {
   offer: PendingOffer
@@ -73,7 +138,10 @@ export function DeliveryOfferModal({ offer, busy, error, onAccept, onDecline }: 
   return (
     <div className="offer-modal-backdrop" role="presentation">
       <section className="offer-modal card" role="dialog" aria-modal="true" aria-label="Nova entrega disponível">
-        <p className="eyebrow">NOVA ENTREGA DISPONÍVEL</p>
+        <div className="offer-modal-header">
+          <p className="eyebrow">NOVA ENTREGA DISPONÍVEL</p>
+          <OfferCountdownRing offeredAt={offer.offeredAt} expiresAt={offer.expiresAt} />
+        </div>
 
         <div className="offer-modal-field">
           <span className="offer-modal-label">Restaurante</span>

@@ -12,7 +12,9 @@ import { useAssignedRoute } from './hooks/useAssignedRoute'
 import { DeliveryOfferModal } from './components/DeliveryOfferModal'
 import { AssignedRouteModal } from './components/AssignedRouteModal'
 import { AssignedRouteCard } from './components/AssignedRouteCard'
+import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
+import { fetchMyActiveRoute } from './services/routes'
 import { formatDuration, routeStatusLabel } from './lib/format'
 import './App.css'
 
@@ -394,6 +396,13 @@ function App() {
   const [gpsError, setGpsError] = useState<string | null>(
     null,
   )
+
+  // Bloqueio de "Encerrar trabalho" com rota ativa: popup dedicado, não o
+  // banner de gpsError — precisa ser bem visível e não pode ser confundido
+  // com falha de GPS. `activeRouteCheckBusy` evita checagens sobrepostas se
+  // o usuário tocar o botão várias vezes seguidas.
+  const [activeRouteBlockedOpen, setActiveRouteBlockedOpen] = useState(false)
+  const [activeRouteCheckBusy, setActiveRouteCheckBusy] = useState(false)
 
   const backgroundTrackingStarted = useRef(false)
 
@@ -1640,6 +1649,20 @@ function App() {
         longitude: location?.longitude ?? null,
       })
 
+      // Sinal ATIVO de "saí" pro mapa em tempo real do restaurante — sem
+      // isso, driver_live_locations só ficava sabendo que o entregador
+      // saiu quando o updated_at envelhecia 30s sem write nenhum (é por
+      // isso que "ficar offline" demorava muito mais pra refletir no Web
+      // do que "ficar online", que é sempre um write novo). Mesma política
+      // de "não bloqueia o encerramento se falhar" do updateMyPresence
+      // acima — e o mesmo caminho de identidade (driver_accounts) do
+      // update_my_driver_location, então não tem efeito nenhum pra um
+      // entregador puramente regional (sem conta de "entregador da loja"),
+      // igual o próprio update_my_driver_location já não tem.
+      void supabase.rpc('clear_my_driver_location').then(({ error }) => {
+        if (error) console.error('ERRO_LIMPAR_LOCALIZACAO:', error)
+      })
+
       return true
     } catch (error) {
       console.error(
@@ -2190,17 +2213,41 @@ function App() {
               // handleLogout), só o botão explícito "Encerrar trabalho"
               // exige finalizar a rota primeiro — evita que o entregador
               // saia do pool de despacho por engano no meio de uma entrega.
-              if (assignedRoute.route) {
-                setGpsError('Você possui uma rota ativa. Finalize a rota antes de encerrar o trabalho.')
-                return
-              }
-              void stopGps()
+              //
+              // A checagem é SEMPRE feita fresca aqui (fetchMyActiveRoute),
+              // nunca contra assignedRoute.route — esse vem de um polling de
+              // 7s (useAssignedRoute) que pode ficar até 7s desatualizado
+              // depois de uma rota ser finalizada em outra tela, o que
+              // causava o falso positivo (bloqueio aparecendo sem rota
+              // ativa de verdade).
+              if (gpsBusy || activeRouteCheckBusy) return
+              void (async () => {
+                setActiveRouteCheckBusy(true)
+                try {
+                  const freshRoute = await fetchMyActiveRoute()
+                  if (freshRoute) {
+                    setActiveRouteBlockedOpen(true)
+                    return
+                  }
+                  await stopGps()
+                } catch (err) {
+                  console.error('ERRO_CHECAR_ROTA_ATIVA:', err)
+                  // Falha ao checar: não presume "sem rota" — evita permitir
+                  // ficar offline durante uma rota real só porque a
+                  // checagem falhou por rede. O usuário pode tentar de novo.
+                  setGpsError('Não foi possível confirmar sua rota. Tente novamente.')
+                } finally {
+                  setActiveRouteCheckBusy(false)
+                }
+              })()
             }}
-            disabled={gpsBusy}
+            disabled={gpsBusy || activeRouteCheckBusy}
           >
             {gpsBusy
               ? 'Encerrando...'
-              : 'Encerrar trabalho'}
+              : activeRouteCheckBusy
+                ? 'Verificando...'
+                : 'Encerrar trabalho'}
           </button>
         )}
       </section>
@@ -2971,6 +3018,16 @@ function App() {
             navigate('route')
           }}
           onLater={() => assignedRoute.dismissPopup()}
+        />
+      )}
+
+      {!deliveryOffers.offer && !assignedRoute.showPopup && activeRouteBlockedOpen && (
+        <ActiveRouteBlockedModal
+          onGoToRoute={() => {
+            setActiveRouteBlockedOpen(false)
+            navigate('route')
+          }}
+          onClose={() => setActiveRouteBlockedOpen(false)}
         />
       )}
     </main>
