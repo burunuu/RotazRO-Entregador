@@ -104,8 +104,13 @@ Ver `src/lib/observability/__tests__/sanitize.test.ts` (inclui um teste específ
 ## 7. Versionamento
 
 - `__ROTAZRO_COMMIT__` — hash curto do git, injetado via `vite.config.ts`'s `define` (mesmo padrão do Web). Cai em `"unknown"` se `git rev-parse` falhar no build.
-- `__ROTAZRO_PKG_VERSION__` — versão de `package.json`, injetada do mesmo jeito. **Gap conhecido, não resolvido nesta rodada**: `package.json.version` está fixo em `"0.0.0"` e `android/app/build.gradle` tem `versionCode 1`/`versionName "1.0"` nunca incrementados. `appRelease()` monta `rotazro-entregador@<pkg_version>+<commit>` — hoje isso vira algo como `rotazro-entregador@0.0.0+a1b2c3d`, então o `commit` é, na prática, o único identificador de build realmente único até a versão ser corrigida.
-- **Proposta mínima de versionamento** (não implementada, fora do escopo desta rodada): antes de cada build para o piloto, bumpar `package.json.version` e `versionCode`/`versionName` juntos (ex.: `0.1.0` / `versionCode 2` / `versionName "0.1.0"`) — nem que seja manual por enquanto, um script de bump automatizado é um P2.
+- `__ROTAZRO_PKG_VERSION__` — versão de `package.json`, injetada do mesmo jeito.
+- **Baseline de pré-piloto (2026-09-19)**: `package.json.version` corrigido de `"0.0.0"` para `"0.1.0"`, `android/app/build.gradle` de `versionCode 1`/`versionName "1.0"` (nunca incrementados desde a criação do projeto) para `versionCode 2`/`versionName "0.1.0"`. `appRelease()` agora monta `rotazro-entregador@0.1.0+<commit>` — build identificável tanto pela versão quanto pelo commit exato.
+- **Como incrementar daqui pra frente** (manual, deliberadamente simples — não criar automação agora): a cada build destinada a um piloto/release,
+  1. bumpar `package.json.version` (semver: `0.1.0` → `0.2.0` para mudança relevante, `0.1.1` para um fix pontual);
+  2. incrementar `android/app/build.gradle`'s `versionCode` em +1 (inteiro sequencial, é o que o Android usa para saber se uma build é "mais nova" que outra — nunca pode diminuir nem repetir);
+  3. igualar `versionName` ao `package.json.version` (mantém os dois em sincronia, evita confusão entre "versão que o app mostra" e "versão do bundle JS").
+  Os dois primeiros pontos nunca devem ficar dessincronizados entre si — um `versionCode` sem o `versionName`/`package.json.version` correspondente é o mesmo problema que existia antes desta correção.
 
 ---
 
