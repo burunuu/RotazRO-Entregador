@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { PushNotifications } from '@capacitor/push-notifications'
 import type { PushNotificationSchema, ActionPerformed, Token } from '@capacitor/push-notifications'
 import { supabase } from '../lib/supabase'
+import { captureError } from '../lib/observability/capture'
 
 /**
  * Push notifications (FCM via @capacitor/push-notifications). Preparação
@@ -74,18 +75,18 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
       PushNotifications.addListener('registration', (token: Token) => {
         currentPushToken = token.value
         void upsertDeviceToken(driverProfileId, token.value).catch((err) =>
-          console.error('ERRO_REGISTRAR_PUSH_TOKEN:', err),
+          captureError(err, { event: 'push.register_token_failed' }),
         )
       })
 
       PushNotifications.addListener('registrationError', (err) => {
-        console.error('ERRO_REGISTRO_PUSH:', err)
+        captureError(err, { event: 'push.registration_failed' })
       })
     }
 
     await PushNotifications.register()
   } catch (error) {
-    console.error('ERRO_PUSH_SETUP:', error)
+    captureError(error, { event: 'push.setup_failed' })
   }
 }
 
@@ -128,11 +129,11 @@ export async function unregisterPush(): Promise<void> {
     await PushNotifications.removeAllDeliveredNotifications()
     void delivered
   } catch (error) {
-    console.error('ERRO_UNREGISTER_PUSH:', error)
+    captureError(error, { event: 'push.unregister_failed' })
   }
 }
 
 export async function revokeCurrentDeviceToken(token: string | null): Promise<void> {
   if (!token) return
-  await revokeDeviceToken(token).catch((err) => console.error('ERRO_REVOGAR_TOKEN:', err))
+  await revokeDeviceToken(token).catch((err) => captureError(err, { event: 'push.revoke_token_failed' }))
 }

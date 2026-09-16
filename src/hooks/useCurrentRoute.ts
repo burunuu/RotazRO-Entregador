@@ -10,6 +10,8 @@ import {
   type MyRoute,
 } from '../services/routes'
 import { describeError } from '../services/error-helpers'
+import { logger } from '../lib/observability/logger'
+import { captureError } from '../lib/observability/capture'
 
 // Enquanto a rota está confirmed/in_progress, mantemos assinatura Realtime
 // (routes + route_stops dessa rota) como mecanismo principal de
@@ -83,7 +85,15 @@ export function useCurrentRoute() {
         { event: '*', schema: 'public', table: 'routes', filter: `id=eq.${routeId}` },
         scheduleRefetch,
       )
-      .subscribe()
+      .subscribe((status, err) => {
+        // CLOSED é esperado no cleanup normal (troca de rota/desmontagem) —
+        // só CHANNEL_ERROR/TIMED_OUT são falhas reais dignas de log. O poll
+        // de 10s abaixo já garante convergência de qualquer forma.
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          logger.warn('realtime.subscription_error', { channel: 'route-execution', status, route_id: routeId })
+          if (err) captureError(err, { event: 'realtime.subscription_error', route_id: routeId, force: true })
+        }
+      })
 
     // Watchdog: garante convergência mesmo se o socket Realtime cair
     // silenciosamente (sem depender de detectar esse estado corretamente).
@@ -112,6 +122,7 @@ export function useCurrentRoute() {
     setError(null)
     try {
       const result = await action()
+      logger.info('route.action_succeeded', { action: context, route_id: route?.id ?? null })
       await refresh()
       return result
     } catch (err) {

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { acceptOffer, declineOffer, fetchPendingOffer, type PendingOffer } from '../services/dispatch'
 import { describeError } from '../services/error-helpers'
+import { captureError } from '../lib/observability/capture'
+import { logger } from '../lib/observability/logger'
 
 /**
  * Realtime é o caminho principal pra notar uma oferta nova (a loja clica
@@ -52,7 +54,7 @@ export function useDeliveryOffers(enabled: boolean) {
         }
       } catch (err) {
         if (!cancelled) {
-          console.error('ERRO_FETCH_OFFER:', err)
+          captureError(err, { event: 'dispatch.fetch_offer_failed' })
         }
       }
     }
@@ -72,7 +74,13 @@ export function useDeliveryOffers(enabled: boolean) {
     const channel = supabase
       .channel('delivery-offers-mine')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_offers' }, scheduleImmediatePoll)
-      .subscribe()
+      .subscribe((status) => {
+        // CLOSED é esperado no cleanup normal — o poll de 5s já garante
+        // convergência mesmo se o socket cair silenciosamente.
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          logger.warn('realtime.subscription_error', { channel: 'delivery-offers-mine', status })
+        }
+      })
 
     return () => {
       cancelled = true
@@ -121,6 +129,7 @@ export function useDeliveryOffers(enabled: boolean) {
     setError(null)
     try {
       const { routeId } = await acceptOffer(offer.id)
+      logger.info('dispatch.offer_accepted', { offer_id: offer.id, route_id: routeId })
       setOffer(null)
       return routeId
     } catch (err) {
@@ -140,6 +149,7 @@ export function useDeliveryOffers(enabled: boolean) {
     setError(null)
     try {
       await declineOffer(offer.id)
+      logger.info('dispatch.offer_declined', { offer_id: offer.id })
       setOffer(null)
     } catch (err) {
       setError(describeError(err, 'RECUSAR_OFERTA', 'Não foi possível recusar a entrega.'))
