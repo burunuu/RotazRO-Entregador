@@ -2185,6 +2185,15 @@ function App() {
           <button
             className="secondary"
             onClick={() => {
+              // Bloqueia aqui, não dentro de stopGps(): logout continua
+              // podendo encerrar o expediente incondicionalmente (ver
+              // handleLogout), só o botão explícito "Encerrar trabalho"
+              // exige finalizar a rota primeiro — evita que o entregador
+              // saia do pool de despacho por engano no meio de uma entrega.
+              if (assignedRoute.route) {
+                setGpsError('Você possui uma rota ativa. Finalize a rota antes de encerrar o trabalho.')
+                return
+              }
               void stopGps()
             }}
             disabled={gpsBusy}

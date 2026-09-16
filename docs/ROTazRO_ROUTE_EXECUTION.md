@@ -50,6 +50,20 @@ Essas RPCs do APK **já eram atômicas** desde que foram criadas (RLS via `drive
 
 O card de resumo (tanto o "QUASE LÁ" quanto o snapshot pós-finalização) mostra **duração real** (`completed_at - started_at`, ou aproximação client-side de `Date.now() - startedAt` no momento exato da finalização) quando disponível — nunca `estimated_duration_s` silenciosamente no lugar de um valor real. `routeRealDurationS()` em `services/routes.ts` centraliza essa regra. Distância continua sendo `total_distance_m` (planejada) — não existe hoje uma "distância real percorrida" calculada (ver `distance_from_previous_m`/`duration_from_previous_s` em `route_stops`: colunas existem no schema mas **nunca são preenchidas** por nenhum fluxo de criação de rota atual, confirmado por grep — não usar sem antes implementar quem as populariam).
 
+## Dispatch Recovery (2026-09-17, revisado no mesmo dia)
+
+**"Encerrar trabalho" durante rota ativa — duas camadas de correção.**
+
+Auditoria inicial confirmou: "Encerrar trabalho" (`stopGps()`, `App.tsx`) não checava rota ativa nenhuma — o entregador podia tocar nesse botão no meio de uma rota `confirmed`/`in_progress`. Até então, o backend simplesmente **ignorava** o `'offline'` que o app já mandava nesse caso (proteção contra o heartbeat `'online'` de 8s derrubar `on_route` por engano acabava bloqueando também a intenção real do entregador). Primeira correção, no repo Web (`update_my_presence`, migration `20260917000000_dispatch_recovery.sql`): só o heartbeat `'online'` de rotina passou a ser ignorado durante `on_route` — um `'offline'` explícito (o que este app sempre enviou) passa a ser honrado imediatamente, mesmo em rota, terminando em `'offline'` **diretamente** (confirmado por teste real contra Postgres, não é leitura de código).
+
+Isso por si só resolvia o dado (presença deixa de mentir), mas a rodada de revisão seguinte identificou que o produto continuava permitindo a ação confusa em si: um entregador podia "encerrar o trabalho" com entregas pendentes, mesmo que a rota continuasse tecnicamente atribuída a ele. **Segunda correção, agora sim neste repo** (`App.tsx`): o botão "Encerrar trabalho" passou a checar `assignedRoute.route` (rota `confirmed`/`in_progress` atribuída) ANTES de chamar `stopGps()` — se houver uma rota ativa, mostra *"Você possui uma rota ativa. Finalize a rota antes de encerrar o trabalho."* e não faz mais nada (não chama `stopGps()`, não toca em `driver_presence`, não mexe na rota).
+
+**Logout continua sem esse bloqueio, deliberadamente** (`handleLogout()`, que também chama `stopGps()`, não foi alterado) — é o único caminho legítimo que sobra pra "offline mid-rota" (telefone perdido, troca de conta, desinstalação), e bloquear logout incondicionalmente seria pior que o problema original. É exatamente por isso que a correção do backend (honrar `'offline'` explícito) continuou necessária mesmo depois do bloqueio do botão — sem ela, um logout no meio da rota deixaria `driver_presence` preso em `on_route` até o watchdog agir.
+
+Consequência prática em ambos os caminhos: a rota em si (`routes.status`) nunca é tocada — continua `in_progress` até `complete_my_route` (ou, no futuro, um cancelamento), exatamente como hoje.
+
+**Watchdog server-side** (`recover_dispatch_state()`, repo Web) expira ofertas regionais vencidas e libera `driver_presence` presa em `on_route` sem rota ativa, independente de qualquer sessão do app estar aberta — relevante para o cenário "app fecha com oferta pendente" (seção acima): a oferta agora expira sozinha mesmo se o entregador nunca mais abrir o app, sem bloquear esse entregador para futuras ofertas. Na rodada de revisão, o watchdog também passou a reavaliar automaticamente rotas com candidatos esgotados quando um driver novo aparece depois — sem nunca reofertar pra quem já recusou/expirou naquela rota específica. Detalhe completo (state machine final, testes) em `ROTazRO_ROUTES_AND_DISPATCH.md` (repo Web).
+
 ## O que NÃO existe aqui
 
 - Reotimização de rota durante a execução (a ordem é sempre a original, menos as paradas já fechadas).

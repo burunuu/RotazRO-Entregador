@@ -19,6 +19,7 @@ export function useDeliveryOffers(enabled: boolean) {
   // Permite a um evento externo (push tocado/recebido) forçar uma busca
   // imediata em vez de esperar o próximo tick do polling de 5s.
   const pollNow = useRef<() => void>(() => {})
+  const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!enabled) {
@@ -58,6 +59,32 @@ export function useDeliveryOffers(enabled: boolean) {
       timer.current = null
     }
   }, [enabled])
+
+  // Fecha o modal no instante exato em que a oferta expira, em vez de
+  // esperar até 5s pelo próximo tick do polling — puramente uma melhoria de
+  // UI local (o cliente nunca decide "expirado" por conta própria em
+  // nenhuma chamada ao banco; accept()/decline() continuam validando tudo
+  // server-side). Sem toast/aviso: o modal simplesmente some, como já
+  // acontecia por polling, só que sem o atraso perceptível.
+  useEffect(() => {
+    if (expiryTimer.current) {
+      clearTimeout(expiryTimer.current)
+      expiryTimer.current = null
+    }
+    if (!offer) return
+    const msRemaining = new Date(offer.expiresAt).getTime() - Date.now()
+    if (msRemaining <= 0) {
+      setOffer(null)
+      return
+    }
+    expiryTimer.current = setTimeout(() => setOffer(null), msRemaining)
+    return () => {
+      if (expiryTimer.current) {
+        clearTimeout(expiryTimer.current)
+        expiryTimer.current = null
+      }
+    }
+  }, [offer])
 
   /** Busca o estado real agora — nunca confia no payload do push, sempre refaz do banco. */
   function refetch() {

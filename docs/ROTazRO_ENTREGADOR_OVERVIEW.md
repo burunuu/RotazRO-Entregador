@@ -62,7 +62,7 @@ Sem framework de estado global (Redux/Zustand) — tudo é `useState`/`useEffect
 - `src/services/routes.ts` — todo acesso a `routes`/`route_stops` do lado do entregador.
 - `src/services/dispatch.ts` — oferta regional (`delivery_offers`, `accept/decline_delivery_offer`).
 - `src/services/notifications.ts` — push (desligado), com a flag central documentada.
-- `src/services/presence.ts` — `driver_presence` (online/offline/on_route), usado pelo despacho regional.
+- `src/services/presence.ts` — `driver_presence` (online/offline/on_route), usado pelo despacho regional. Desde 2026-09-17, um `'offline'` explícito (enviado por logout, ou por "Encerrar trabalho" quando não há rota ativa) é honrado pelo backend mesmo durante `on_route`, terminando DIRETO em `offline` — só o heartbeat `'online'` de rotina continua sendo ignorado nesse estado. O botão "Encerrar trabalho" em si (`App.tsx`) bloqueia a ação quando há uma rota `confirmed`/`in_progress` atribuída — logout continua sem esse bloqueio, deliberadamente. Ver `ROTazRO_ROUTE_EXECUTION.md`, seção "Dispatch Recovery", e `ROTazRO_BACKEND_SUPABASE.md` no repo Web.
 - `src/services/driver-identity.ts` — `driver_profiles` / `ensure_driver_profile`.
 - `src/lib/format.ts` — formatação de duração e tradução de status de rota, compartilhados.
 
