@@ -4,6 +4,16 @@ import { Capacitor } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { BackgroundGeolocation } from '@capgo/background-geolocation'
 import { supabase } from './lib/supabase'
+import { ensureDriverProfile } from './services/driver-identity'
+import { updateMyPresence } from './services/presence'
+import { registerForPush, onNotificationOpened, unregisterPush } from './services/notifications'
+import { useDeliveryOffers } from './hooks/useDeliveryOffers'
+import { useAssignedRoute } from './hooks/useAssignedRoute'
+import { DeliveryOfferModal } from './components/DeliveryOfferModal'
+import { AssignedRouteModal } from './components/AssignedRouteModal'
+import { AssignedRouteCard } from './components/AssignedRouteCard'
+import { MyRouteScreen } from './screens/MyRouteScreen'
+import { formatDuration, routeStatusLabel } from './lib/format'
 import './App.css'
 
 const LOCATION_SYNC_INTERVAL_MS = 8000
@@ -22,7 +32,7 @@ const VEHICLE_TYPES = [
   { value: 'van', label: 'Van' },
 ]
 
-type AppView = 'home' | 'profile' | 'history'
+type AppView = 'home' | 'profile' | 'history' | 'route'
 
 type Driver = {
   id: string
@@ -31,7 +41,12 @@ type Driver = {
   vehicle_type: string | null
   vehicle_plate: string | null
   is_active: boolean
-  organization_id: string
+  /**
+   * `null` para um entregador puramente regional (só possui driver_profiles,
+   * sem vínculo em driver_accounts/drivers de nenhum restaurante ainda) —
+   * ver o fallback em loadDriver().
+   */
+  organization_id: string | null
 }
 
 type LocationData = {
@@ -169,14 +184,11 @@ function formatClock(date: Date) {
   })
 }
 
-function formatLongDate(date: Date) {
-  const formatted = date.toLocaleDateString('pt-BR', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-  })
+const SHORT_MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
 
-  return formatted.charAt(0).toUpperCase() + formatted.slice(1)
+/** Versão compacta da data para o indicador discreto no topo da Home (ex.: "14 set"). */
+function formatShortDate(date: Date) {
+  return `${date.getDate()} ${SHORT_MONTHS[date.getMonth()]}`
 }
 
 function formatDate(value: string | null) {
@@ -209,23 +221,6 @@ function formatDistance(meters: number) {
   if (!Number.isFinite(meters) || meters <= 0) return '0 km'
 
   return `${(meters / 1000).toFixed(1)} km`
-}
-
-function formatDuration(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '—'
-
-  const roundedMinutes = Math.round(seconds / 60)
-
-  if (roundedMinutes < 60) {
-    return `${roundedMinutes} min`
-  }
-
-  const hours = Math.floor(roundedMinutes / 60)
-  const minutes = roundedMinutes % 60
-
-  if (minutes === 0) return `${hours}h`
-
-  return `${hours}h ${minutes}min`
 }
 
 function formatMoney(cents: number | null) {
@@ -401,6 +396,37 @@ function App() {
   )
 
   const backgroundTrackingStarted = useRef(false)
+
+  // =========================================================
+  // DESPACHO REGIONAL
+  // =========================================================
+  // Chamado incondicionalmente (regra dos hooks) mesmo antes do login —
+  // fica inerte (enabled=false) enquanto não há sessão/tracking. Gated por
+  // `tracking` (não só `authenticated`) porque dispatch_route_regional só
+  // considera drivers com driver_presence.status='online', que só é
+  // setado ao iniciar o trabalho (ver sendLocationToSupabase) — não faria
+  // sentido fazer polling de oferta antes disso, nunca haveria nada.
+  const deliveryOffers = useDeliveryOffers(authenticated && tracking)
+
+  // Detecção de rota atribuída diretamente pelo restaurante ("entregador
+  // da loja") ou já aceita via oferta regional — independente de
+  // `tracking`, porque a atribuição não depende de presence/GPS.
+  const assignedRoute = useAssignedRoute(authenticated)
+
+  useEffect(() => {
+    if (!authenticated || !driver) return
+    void registerForPush(driver.id)
+    return onNotificationOpened(() => {
+      // O payload do push só serve de gatilho — o estado real (se a oferta
+      // ainda está pendente) é sempre buscado de novo do banco, nunca
+      // confiado diretamente. Isso apenas adianta o próximo tick do
+      // polling de 5s: se a oferta já foi expirada/cancelada/aceita por
+      // outro entregador, o refetch simplesmente não encontra nada e o
+      // modal não aparece.
+      deliveryOffers.refetch()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, driver?.id])
 
   // =========================================================
   // SINCRONIZAÇÃO
@@ -671,10 +697,32 @@ function App() {
       throw accountError
     }
 
+    // Sem vínculo em driver_accounts (nenhum restaurante o cadastrou como
+    // "entregador da loja" ainda): trata como entregador puramente
+    // regional, cuja identidade vem de driver_profiles em vez de drivers.
+    // O fluxo legado abaixo (driver_accounts -> drivers) continua 100%
+    // inalterado para quem já tem vínculo.
     if (!account) {
-      throw new Error(
-        'Esta conta não está vinculada a um entregador.',
-      )
+      const profile = await ensureDriverProfile()
+
+      if (!profile.is_active) {
+        throw new Error('Este entregador está inativo.')
+      }
+
+      const regionalDriver: Driver = {
+        id: profile.id,
+        name: profile.full_name || 'Entregador',
+        phone: profile.phone,
+        vehicle_type: profile.vehicle_type,
+        vehicle_plate: profile.vehicle_plate,
+        is_active: profile.is_active,
+        organization_id: null,
+      }
+
+      setDriver(regionalDriver)
+      populateProfile(regionalDriver)
+
+      return regionalDriver
     }
 
     const { data: driverData, error: driverError } =
@@ -702,6 +750,13 @@ function App() {
 
     setDriver(typedDriver)
     populateProfile(typedDriver)
+
+    // Também garante um driver_profiles para entregadores "da loja" —
+    // habilita-os a participar do despacho regional futuramente, sem exigir
+    // nenhuma ação extra deles agora. Nunca bloqueia o login se falhar.
+    ensureDriverProfile().catch((error) =>
+      console.error('ERRO_ENSURE_DRIVER_PROFILE:', error),
+    )
 
     return typedDriver
   }
@@ -899,6 +954,52 @@ function App() {
       setHistoryLoading(false)
     }
   }
+
+  // =========================================================
+  // HISTÓRICO — REALTIME
+  // =========================================================
+  // Só assina enquanto a tela de Histórico está aberta — não fica um canal
+  // parado aberto o resto do tempo que o entregador passa no app (Home,
+  // Minha Rota, etc. têm seus próprios ciclos de vida). Filtra por
+  // driver_id (não por uma rota específica, como useCurrentRoute): aqui o
+  // interesse é "alguma rota minha mudou de status/distância real/hora de
+  // conclusão", não o detalhe ao vivo de uma execução em curso — por isso
+  // não assina route_stops nem mantém um poll de baixa frequência próprio:
+  // toda vez que o entregador entra em Histórico, loadHistory() já busca
+  // os dados atuais (ver navigate()), então Realtime aqui só cobre ficar
+  // OLHANDO a tela enquanto algo muda — um caso bem mais raro que o de
+  // uma rota ativa em execução.
+  useEffect(() => {
+    if (view !== 'history' || !driver) return
+    const driverId = driver.id
+
+    let cancelled = false
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+    function scheduleReload() {
+      if (cancelled) return
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        if (!cancelled) void loadHistory(driverId)
+      }, 300)
+    }
+
+    const channel = supabase
+      .channel(`history-${driverId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'routes', filter: `driver_id=eq.${driverId}` },
+        scheduleReload,
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      if (debounceTimer) clearTimeout(debounceTimer)
+      void supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, driver])
 
   // =========================================================
   // SESSÃO
@@ -1209,6 +1310,17 @@ function App() {
       if (error) {
         throw error
       }
+
+      // Sinal de disponibilidade para o despacho regional — nunca pode
+      // interromper o GPS legado acima, por isso não é aguardado nem
+      // lança: updateMyPresence já engole os próprios erros.
+      void updateMyPresence('online', {
+        latitude,
+        longitude,
+        accuracy,
+        speed,
+        heading,
+      })
 
       const syncedTimestamp = data
         ? new Date(data).getTime()
@@ -1521,6 +1633,13 @@ function App() {
         'Localização pausada',
       )
 
+      // Sai do pool de matching regional. Não bloqueia o encerramento do
+      // trabalho se falhar (já registra o próprio erro).
+      void updateMyPresence('offline', {
+        latitude: location?.latitude ?? null,
+        longitude: location?.longitude ?? null,
+      })
+
       return true
     } catch (error) {
       console.error(
@@ -1562,6 +1681,10 @@ function App() {
 
       return
     }
+
+    // Precisa rodar antes do signOut: a revogação do token grava em
+    // driver_devices via RLS, que exige a sessão ainda autenticada.
+    await unregisterPush()
 
     await supabase.auth.signOut()
 
@@ -1796,6 +1919,21 @@ function App() {
             <span>◷</span>
             Histórico
           </button>
+
+          <button
+            type="button"
+            className={
+              view === 'route'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              navigate('route')
+            }
+          >
+            <span>⊙</span>
+            Minha rota
+          </button>
         </nav>
 
         <div className="drawer-work-status">
@@ -1889,60 +2027,39 @@ function App() {
           </p>
         </div>
 
-        <div
-          className={`work-badge ${
-            tracking
-              ? 'online'
-              : ''
-          }`}
-        >
-          <span />
+        <div className="home-hero-meta">
+          <div className="home-datetime">
+            <span className="home-datetime-weather">
+              {temperature != null ? `${Math.round(temperature)}°C` : weatherLoading ? '...' : '—'} ☀
+            </span>
+            <span className="home-datetime-date">
+              {formatShortDate(currentDateTime)} • {formatClock(currentDateTime)}
+            </span>
+          </div>
 
-          {tracking
-            ? 'Em trabalho'
-            : 'Fora de expediente'}
-        </div>
-      </section>
+          <div
+            className={`work-badge ${
+              tracking
+                ? 'online'
+                : ''
+            }`}
+          >
+            <span />
 
-      <section className="day-info-card">
-        <div className="day-info-main">
-          <small>AGORA</small>
-
-          <strong>
-            {formatLongDate(
-              currentDateTime,
-            )}
-          </strong>
-
-          <span>
-            {formatClock(
-              currentDateTime,
-            )}
-          </span>
-        </div>
-
-        <div className="weather-display">
-          <span className="weather-icon">
-            ☀
-          </span>
-
-          <div>
-            <strong>
-              {temperature != null
-                ? `${Math.round(
-                    temperature,
-                  )}°C`
-                : weatherLoading
-                  ? '...'
-                  : '—'}
-            </strong>
-
-            <small>
-              Temperatura local
-            </small>
+            {tracking
+              ? 'Em trabalho'
+              : 'Fora de expediente'}
           </div>
         </div>
       </section>
+
+      {assignedRoute.route && (
+        <AssignedRouteCard
+          route={assignedRoute.route}
+          nextStop={assignedRoute.nextStop}
+          onOpen={() => navigate('route')}
+        />
+      )}
 
       {gpsError && (
         <div className="error">
@@ -2068,6 +2185,15 @@ function App() {
           <button
             className="secondary"
             onClick={() => {
+              // Bloqueia aqui, não dentro de stopGps(): logout continua
+              // podendo encerrar o expediente incondicionalmente (ver
+              // handleLogout), só o botão explícito "Encerrar trabalho"
+              // exige finalizar a rota primeiro — evita que o entregador
+              // saia do pool de despacho por engano no meio de uma entrega.
+              if (assignedRoute.route) {
+                setGpsError('Você possui uma rota ativa. Finalize a rota antes de encerrar o trabalho.')
+                return
+              }
               void stopGps()
             }}
             disabled={gpsBusy}
@@ -2542,22 +2668,11 @@ function App() {
           Rotas realizadas
         </h2>
 
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={() => {
-            if (driver) {
-              void loadHistory(
-                driver.id,
-              )
-            }
-          }}
-          disabled={historyLoading}
-        >
-          {historyLoading
-            ? 'Atualizando...'
-            : 'Atualizar'}
-        </button>
+        {historyLoading && (
+          <span className="history-sync-hint">
+            Atualizando...
+          </span>
+        )}
       </div>
 
       {historyError && (
@@ -2642,9 +2757,7 @@ function App() {
                             : ''
                         }`}
                       >
-                        {route.completed_at
-                          ? 'Concluída'
-                          : route.status}
+                        {routeStatusLabel(route.status)}
                       </span>
                     </div>
 
@@ -2801,7 +2914,7 @@ function App() {
                         </span>
 
                         <strong>
-                          {route.status}
+                          {routeStatusLabel(route.status)}
                         </strong>
                       </div>
                     </div>
@@ -2831,8 +2944,35 @@ function App() {
 
           {view === 'history' &&
             historyView}
+
+          {view === 'route' && <MyRouteScreen onFinished={() => navigate('home')} />}
         </div>
       </section>
+
+      {deliveryOffers.offer && (
+        <DeliveryOfferModal
+          offer={deliveryOffers.offer}
+          busy={deliveryOffers.busy}
+          error={deliveryOffers.error}
+          onAccept={() => {
+            void deliveryOffers.accept().then((routeId) => {
+              if (routeId) navigate('route')
+            })
+          }}
+          onDecline={() => void deliveryOffers.decline()}
+        />
+      )}
+
+      {!deliveryOffers.offer && assignedRoute.showPopup && assignedRoute.route && (
+        <AssignedRouteModal
+          route={assignedRoute.route}
+          onViewRoute={() => {
+            assignedRoute.dismissPopup()
+            navigate('route')
+          }}
+          onLater={() => assignedRoute.dismissPopup()}
+        />
+      )}
     </main>
   )
 }
