@@ -14,7 +14,7 @@ import * as Sentry from "@sentry/capacitor";
 import * as SentryReact from "@sentry/react";
 import { setSentryEnabled } from "./capture";
 import { sanitizeEvent, type SanitizableEvent } from "./sanitize";
-import { appRelease, appEnvironment } from "./version";
+import { appRelease, appEnvironment, appTracesSampleRate } from "./version";
 
 let initialized = false;
 
@@ -30,9 +30,9 @@ export function initSentry() {
       dsn,
       release: appRelease(),
       environment: appEnvironment(),
-      // Low, fixed sampling per explicit instruction — basic slow-call
-      // visibility, not a full APM rollout.
-      tracesSampleRate: 0.1,
+      // See version.ts for the default and the optional
+      // VITE_SENTRY_TRACES_SAMPLE_RATE override.
+      tracesSampleRate: appTracesSampleRate(),
       // See sanitize.ts's SanitizableEvent doc comment for why this cast
       // exists — it keeps sanitize.ts SDK-agnostic and independently
       // typecheckable/testable without @sentry/capacitor installed.

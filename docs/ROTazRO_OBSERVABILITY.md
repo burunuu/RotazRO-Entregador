@@ -1,6 +1,6 @@
 # Observabilidade — RotazRO Entregador (APK)
 
-> Implementado em 2026-09-19, preparação para o piloto. Nada disto foi aplicado em produção/Play Store — ver "Configuração manual" no final. Contraparte do painel Web: `D:\RotazRO\RotazRO\docs\ROTazRO_OBSERVABILITY.md` (arquitetura idêntica, este documento cobre só o que é específico do APK). Formato: para cada área, "SE ACONTECER X, OLHE Y".
+> Implementado em 2026-09-19, revisado em 2026-09-19 (rodada 2) para deixar o projeto Sentry pronto para receber DSN real. Nada disto foi aplicado em produção/Play Store — ver "Configuração manual" no final. Contraparte do painel Web: `D:\RotazRO\RotazRO\docs\ROTazRO_OBSERVABILITY.md` (arquitetura idêntica, este documento cobre só o que é específico do APK). Formato: para cada área, "SE ACONTECER X, OLHE Y".
 
 ---
 
@@ -15,7 +15,7 @@ src/lib/observability/
   sanitize.ts   — sanitizeEvent(), + GPS_KEY_PATTERN (só neste repo)
   capture.ts    — captureError/addBreadcrumbSafe, no-op sem VITE_SENTRY_DSN,
                   + downgrade para breadcrumb quando o device está offline
-  version.ts    — appCommit()/appPackageVersion()/appRelease()/appEnvironment()
+  version.ts    — appCommit()/appPackageVersion()/appRelease()/appEnvironment()/appTracesSampleRate()
   sentry.init.ts — Sentry.init() com @sentry/capacitor + @sentry/react
 ```
 
@@ -68,6 +68,10 @@ src/lib/observability/
 
 **Cobertura ampla via `describeError()`** (`src/services/error-helpers.ts`): este é o ponto central que a maioria dos `catch` do app chama para transformar um erro do Supabase/rede numa mensagem amigável — todas as 3 ramificações internas dele já chamam `captureError`, então qualquer chamador novo que use `describeError()` ganha observabilidade automaticamente, sem precisar adicionar `captureError` manualmente em cada site.
 
+### Tags úteis em cada evento
+
+Todo evento carrega, quando disponíveis, os campos de `ObservabilityContext` (`organization_id`, `route_id`, `driver_id`, `driver_profile_id`, `offer_id`, `stop_id`, `order_id`) como tags + contexto `rotazro` — nunca GPS/PII. Além disso, todo evento do Sentry carrega automaticamente `app="android"` (`initialScope.tags` em `sentry.init.ts`), `environment` (seção 7) e `release` (seção 7).
+
 ---
 
 ## 4. Privacidade — o que nunca é enviado
@@ -77,7 +81,7 @@ Mesma base do Web (`src/lib/observability/sanitize.ts`) — strip estrutural de 
 - **GPS nunca sai do device em texto legível dentro de um evento de erro**: `GPS_KEY_PATTERN = /^(latitude|longitude|lat|lng|lon|coords?)$/i` redige qualquer chave com esse nome em `extra`/`contexts`/`breadcrumbs`, recursivamente. `ObservabilityContext` (seção 5 do doc do Web) também nunca inclui um campo de coordenada por design — a regra existe nos dois níveis (o quê é colocado no contexto em primeiro lugar, e uma rede de segurança no `beforeSend`).
 - **Nenhum evento de erro grava latitude/longitude precisa** — confirmado por leitura de todos os call sites de `captureError` no GPS (`App.tsx`, `presence.ts`): nenhum passa coordenadas em `extra`.
 
-Ver `src/lib/observability/__tests__/sanitize.test.ts` (inclui um teste específico de redação de GPS).
+Revalidado nesta rodada: `src/lib/observability/__tests__/sanitize.test.ts` continua cobrindo Authorization/Cookie, segredos, PII, **GPS**, `contexts`/`breadcrumbs` e o caso no-op — todos os 6 testes passando.
 
 ---
 
@@ -88,7 +92,7 @@ Ver `src/lib/observability/__tests__/sanitize.test.ts` (inclui um teste específ
 - O envio ao Sentry é **rebaixado para um breadcrumb** (`offline_suppressed`) em vez de uma exceção completa — evita inundar o Sentry com dezenas de falhas de rede idênticas durante um período sem sinal, que não diriam nada de útil além de "o device ficou sem internet".
 - `force: true` é usado nos poucos lugares onde o erro claramente não tem cara de problema de rede (ex.: um erro de Realtime que não é `CHANNEL_ERROR`/`TIMED_OUT`) — usar com moderação.
 
-**SE o Sentry mostrar muitos breadcrumbs `offline_suppressed` e poucas exceções reais num período, é esperado** — significa que o app estava se comportando corretamente offline, não que a observabilidade está com problema.
+**SE o Sentry mostrar muitos breadcrumbs `offline_suppressed` e poucas exceções reais num período, é esperado** — significa que o app estava se comportando corretamente offline, não que a observabilidade está com problema. **Isso também afeta como calibrar alertas de "taxa de crash"** (seção 11): um pico de breadcrumbs offline não deve disparar o mesmo alerta que um pico de exceções reais, porque não é a mesma coisa — configurar a regra de alerta no Sentry sobre eventos `level:error`, não sobre breadcrumbs.
 
 ---
 
@@ -101,63 +105,154 @@ Ver `src/lib/observability/__tests__/sanitize.test.ts` (inclui um teste específ
 
 ---
 
-## 7. Versionamento
+## 7. Versionamento, ambiente e release
 
 - `__ROTAZRO_COMMIT__` — hash curto do git, injetado via `vite.config.ts`'s `define` (mesmo padrão do Web). Cai em `"unknown"` se `git rev-parse` falhar no build.
 - `__ROTAZRO_PKG_VERSION__` — versão de `package.json`, injetada do mesmo jeito.
-- **Baseline de pré-piloto (2026-09-19)**: `package.json.version` corrigido de `"0.0.0"` para `"0.1.0"`, `android/app/build.gradle` de `versionCode 1`/`versionName "1.0"` (nunca incrementados desde a criação do projeto) para `versionCode 2`/`versionName "0.1.0"`. `appRelease()` agora monta `rotazro-entregador@0.1.0+<commit>` — build identificável tanto pela versão quanto pelo commit exato.
+- **Baseline de pré-piloto (2026-09-19)**: `package.json.version` corrigido de `"0.0.0"` para `"0.1.0"`, `android/app/build.gradle` de `versionCode 1`/`versionName "1.0"` (nunca incrementados desde a criação do projeto) para `versionCode 2`/`versionName "0.1.0"`. `appRelease()` monta `rotazro-entregador@0.1.0+<commit>` — build identificável tanto pela versão quanto pelo commit exato (esse formato foi mantido deliberadamente em vez de usar `versionCode` na release: o commit é o que permite ao Sentry correlacionar com o GitHub — ver seção 8 — enquanto `versionCode`/`versionName` continuam existindo separadamente para o Play Console).
 - **Como incrementar daqui pra frente** (manual, deliberadamente simples — não criar automação agora): a cada build destinada a um piloto/release,
   1. bumpar `package.json.version` (semver: `0.1.0` → `0.2.0` para mudança relevante, `0.1.1` para um fix pontual);
   2. incrementar `android/app/build.gradle`'s `versionCode` em +1 (inteiro sequencial, é o que o Android usa para saber se uma build é "mais nova" que outra — nunca pode diminuir nem repetir);
   3. igualar `versionName` ao `package.json.version` (mantém os dois em sincronia, evita confusão entre "versão que o app mostra" e "versão do bundle JS").
   Os dois primeiros pontos nunca devem ficar dessincronizados entre si — um `versionCode` sem o `versionName`/`package.json.version` correspondente é o mesmo problema que existia antes desta correção.
+- **Environment — corrigido nesta rodada**: `VITE_SENTRY_ENVIRONMENT` sempre vence quando definida explicitamente (`production` em builds de release, `preview` num build de teste interno se fizer sentido usar esse conceito aqui, `development` local). Antes desta rodada, a ausência da variável caía direto em `"production"`, inclusive rodando `vite dev` localmente — agora cai em `"development"` nesse caso (`import.meta.env.DEV`), e só em `"production"` como último recurso (build real sem a variável). Coberto por `version.test.ts` (novo nesta rodada).
 
 ---
 
-## 8. Sem infraestrutura de banco/cron própria
+## 8. Correlação com commits do GitHub e source maps — preparado, upload real ainda não configurado
+
+**Objetivo**: hoje a stack trace de um erro chega minificada no Sentry. Com source maps enviados, o Sentry mostra o código-fonte real e consegue correlacionar a release com os commits do repo `burunuu/RotazRO-Entregador` ("Suspect Commits").
+
+**Diferente do Web**: este é um app Vite+React puro (não um meta-framework), então não existe um `@sentry/<framework>/vite` dedicado — o pacote genérico é `@sentry/vite-plugin`. **Não instalado nesta rodada** (evitar adicionar uma dependência de build sem poder validar o upload de ponta a ponta sem um token real).
+
+**Configuração pronta para colar quando o token existir** (`vite.config.ts`, depois de `npm install --save-dev @sentry/vite-plugin`):
+
+```ts
+import { sentryVitePlugin } from "@sentry/vite-plugin";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    // Só ativa o upload se houver token — self-guard explícito, já que
+    // @sentry/vite-plugin (diferente do wrapper do Web) não tem essa
+    // checagem embutida por padrão.
+    ...(process.env.SENTRY_AUTH_TOKEN
+      ? [
+          sentryVitePlugin({
+            // org/project também podem vir de SENTRY_ORG/SENTRY_PROJECT
+            // no ambiente — não é obrigatório passá-los aqui.
+            release: { name: `rotazro-entregador@${packageVersion()}+${gitShortHash()}`, setCommits: { auto: true } },
+          }),
+        ]
+      : []),
+  ],
+  build: { sourcemap: true }, // necessário para o plugin ter o que enviar
+  define: { /* ...já existente... */ },
+});
+```
+
+**Variáveis necessárias só no ambiente de build** (nunca no bundle do APK, nunca commitadas):
+- `SENTRY_AUTH_TOKEN` — token de organização do Sentry, escopo `project:releases` + `project:write`.
+- `SENTRY_ORG` — slug da organização.
+- `SENTRY_PROJECT` — slug do projeto "RotazRO Entregador" (diferente do projeto "RotazRO Web" — ver seção 12).
+
+**Não fazer upload real nesta rodada** — nenhum desses três valores está configurado. Quando o token existir, rodar `npm run build` uma vez localmente para confirmar o upload antes de qualquer automação de release para a Play Store.
+
+---
+
+## 9. Sem infraestrutura de banco/cron própria
 
 Este app não tem backend próprio — GPS, ofertas, rotas passam todos pelo Supabase compartilhado com o Web. Para watchdog/cron/health check do backend, ver `ROTazRO_OBSERVABILITY.md` do repo Web (seções 5-7) — não há nada específico de infraestrutura de servidor para documentar aqui.
 
 ---
 
-## 9. Performance / Tracing
+## 10. Performance / Tracing
 
-`tracesSampleRate: 0.1` (10%) em `Sentry.init()` — mesma política do Web, deliberadamente baixa, não uma solução de APM completa.
+`tracesSampleRate` = **10% por padrão** (`appTracesSampleRate()` em `version.ts`) — mesma política do Web, deliberadamente baixa, não uma solução de APM completa.
+
+**Novo nesta rodada**: configurável via `VITE_SENTRY_TRACES_SAMPLE_RATE`, 0 a 1. Um valor ausente, não numérico ou fora de `[0,1]` cai no padrão de 0.1 (coberto por 4 testes em `version.test.ts`).
 
 ---
 
-## 10. Variáveis de ambiente
+## 11. Alertas — proposta mínima
+
+Mesma filosofia do Web (`ROTazRO_OBSERVABILITY.md` do repo Web, seção 17) — configurar no painel do Sentry, sem lógica de alerta customizada no código. Recorte específico do APK:
+
+| Nível | Condição | Como |
+|---|---|---|
+| **CRITICAL** | Crash recorrente (`app.window_error`/`app.root_error_boundary` repetido); `auth.login_failed`/`auth.ensure_driver_profile_failed` em volume alto (pode indicar quebra de Auth, não só senha errada isolada) | Alerta do Sentry por taxa de evento. |
+| **HIGH** | `gps.background_location_error`/`gps.foreground_location_error` recorrente (GPS é o núcleo funcional do app); `realtime.subscription_error` com `force:true` repetido (já filtrado de ruído de rede — ver seção 5) | Alerta do Sentry por evento. |
+| **MEDIUM** | `push.*_failed` isolado (push está desligado em produção — ver `ROTazRO_PUSH_NOTIFICATIONS.md`, prioridade baixa até ser ativado) | Revisão manual periódica. |
+
+**Importante** (seção 5): configurar as regras sobre eventos `level:error` reais, não sobre breadcrumbs `offline_suppressed` — senão um dia comum de entregadores com sinal fraco dispara alerta sem que nada esteja quebrado.
+
+---
+
+## 12. Sentry — projeto e variáveis de ambiente
+
+### Mapeamento projeto Sentry ↔ repositório GitHub
+
+| Projeto Sentry | Repositório GitHub |
+|---|---|
+| **RotazRO Entregador** | [`burunuu/RotazRO-Entregador`](https://github.com/burunuu/RotazRO-Entregador) (este repo) |
+| RotazRO Web | [`burunuu/RotazRO`](https://github.com/burunuu/RotazRO) — ver `D:\RotazRO\RotazRO\docs\ROTazRO_OBSERVABILITY.md` |
+
+Projetos separados — não misturar DSNs entre eles.
+
+### Variáveis de ambiente confirmadas contra o código real
 
 Ver `.env.example` (novo nesta rodada — o repo não tinha um antes). Todas opcionais — sem `VITE_SENTRY_DSN`, Sentry nunca inicializa e tudo em `capture.ts` é no-op garantido.
 
 | Variável | Onde é lida | Obrigatória? |
 |---|---|---|
-| `VITE_SENTRY_DSN` | `sentry.init.ts`, via `import.meta.env` (bundlada no APK) | Não — sem ela, Sentry nunca inicializa. |
-| `VITE_SENTRY_ENVIRONMENT` | `version.ts` | Não — cai em `"production"`. |
+| `VITE_SENTRY_DSN` | `sentry.init.ts`, via `import.meta.env` (bundlada no APK — o Capacitor empacota o bundle Vite já compilado, então precisa estar presente no `npm run build`, não em runtime no device) | Não — sem ela, Sentry nunca inicializa. |
+| `VITE_SENTRY_ENVIRONMENT` | `version.ts` | Não — ver seção 7 para o fallback. |
+| `VITE_SENTRY_TRACES_SAMPLE_RATE` | `version.ts` | Não — padrão 0.1 (seção 10). |
+| `SENTRY_AUTH_TOKEN` | Só ambiente de build, se/quando o `@sentry/vite-plugin` (seção 8) for adicionado | Não. **Nunca em `VITE_*`, nunca no runtime/APK instalado.** |
+| `SENTRY_ORG` | Só ambiente de build | Não — só usado pelo plugin de source maps. |
+| `SENTRY_PROJECT` | Só ambiente de build | Não — deve apontar para o projeto "RotazRO Entregador", não o "RotazRO Web". |
 
-Não existe `SENTRY_AUTH_TOKEN` neste repo (não há upload de source maps configurado nesta rodada) — se configurado no futuro, nunca deve ir para uma variável `VITE_*` (viraria parte do APK instalado, legível por qualquer um).
+Não existia `SENTRY_AUTH_TOKEN` neste repo antes — se configurado no futuro, nunca deve ir para uma variável `VITE_*` (viraria parte do APK instalado, legível por qualquer um que descompile o bundle).
 
 ---
 
-## 11. Testes
+## 13. Teste de evento (depois que o DSN estiver configurado)
 
-Este repo **não tinha runner de testes configurado** antes desta rodada (`package.json` só tinha `dev`/`build`/`lint`/`preview`). Adicionado `vitest` como devDependency (mesma ferramenta do repo Web, sem framework novo) + script `npm test`.
+1. Configure `VITE_SENTRY_DSN` localmente (`.env`, nunca commitar) apontando para o projeto "RotazRO Entregador".
+2. Rode `npm run dev` (ou um build de debug completo, se quiser testar o caminho nativo do Capacitor).
+3. Adicione **temporariamente** uma chamada de teste em um ponto já montado do app, por exemplo dentro de um `useEffect` de desenvolvimento ou atrás de um botão já existente numa tela de debug:
+   ```ts
+   import { captureError } from "@/lib/observability/capture";
+   captureError(new Error("RotazRO Sentry test"), { event: "test.sentry_smoke_test", force: true });
+   ```
+   (`force: true` garante que não seja rebaixado a breadcrumb mesmo que o emulador/device esteja sem sinal no momento do teste.)
+4. Dispare a chamada, confirme no painel do Sentry (projeto "RotazRO Entregador") que `test.sentry_smoke_test` chegou.
+5. **Remova o código temporário imediatamente depois** — nunca deixar um gatilho de erro acessível em produção/no APK publicado.
+
+---
+
+## 14. Testes
+
+Este repo **não tinha runner de testes configurado** antes da rodada anterior (`package.json` só tinha `dev`/`build`/`lint`/`preview`). `vitest` adicionado como devDependency (mesma ferramenta do repo Web, sem framework novo) + script `npm test`.
 
 `src/lib/observability/__tests__/` (`npm test`):
 - `sanitize.test.ts` — headers de auth removidos, chaves de segredo/PII/**GPS** redigidas (incluindo aninhadas), contexts/breadcrumbs sanitizados, no-op em evento limpo.
 - `logger.test.ts` — forma da linha JSON, roteamento por nível, debug silencioso por padrão, chamada sem `fields`.
 - `capture.test.ts` — **confirma que com Sentry desabilitado (sem DSN, o estado padrão), `captureError`/`addBreadcrumbSafe` nunca lançam exceção e continuam logando localmente**.
+- `version.test.ts` (novo nesta rodada) — `appEnvironment()` respeita a variável explícita e nunca reporta `"production"` por padrão rodando em dev; `appTracesSampleRate()` respeita um override válido e cai no padrão de 0.1 para valor ausente/inválido/fora de faixa.
 
-15 testes, todos passando nesta rodada (`npx vitest run src/lib/observability`).
+21 testes, todos passando nesta rodada (`npm test`).
 
 ---
 
-## 12. Configuração manual necessária (nada disto foi feito automaticamente)
+## 15. Configuração manual necessária (nada disto foi feito automaticamente)
 
-1. Criar um projeto no [sentry.io](https://sentry.io) para o APK (Android/React, pode reaproveitar a mesma conta usada para o projeto Web, mas como projeto separado — plataformas diferentes têm processamento de evento ligeiramente diferente no Sentry).
-2. Copiar o DSN e configurar `VITE_SENTRY_DSN` como variável de ambiente **no processo de build** (o Capacitor empacota o bundle Vite já compilado — a env var precisa estar presente no momento do `npm run build`, não em runtime no device).
-3. Opcional: `VITE_SENTRY_ENVIRONMENT=production`.
-4. Resolver o gap de versionamento (seção 7) antes do piloto real, para que builds futuras sejam identificáveis no Sentry sem depender só do commit.
-5. No painel do Sentry: configurar notificação (e-mail/Slack) para novas issues.
+1. No projeto Sentry **"RotazRO Entregador"** (já criado manualmente, associado a `burunuu/RotazRO-Entregador` — seção 12): copiar o DSN.
+2. Configurar `VITE_SENTRY_DSN` como variável de ambiente **no processo de build** (nunca em runtime no device).
+3. Opcional: `VITE_SENTRY_ENVIRONMENT=production` explicitamente.
+4. Opcional: `VITE_SENTRY_TRACES_SAMPLE_RATE` se 10% não for o valor desejado.
+5. Depois do DSN configurado: seguir a seção 13 para um evento de teste único, confirmar no painel, remover o código temporário.
+6. Opcional, fora do escopo desta rodada: `SENTRY_AUTH_TOKEN`/`SENTRY_ORG`/`SENTRY_PROJECT` + instalar `@sentry/vite-plugin` (seção 8), para stack traces legíveis e correlação com commits do GitHub.
+7. No painel do Sentry: conectar a integração do GitHub (`burunuu/RotazRO-Entregador`) e configurar notificação (e-mail/Slack) para novas issues.
 
 **Este documento não pede para colar nenhum DSN no chat — configure diretamente no ambiente de build.**
