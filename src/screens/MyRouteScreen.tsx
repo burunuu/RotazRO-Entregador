@@ -109,22 +109,26 @@ export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
 
   if (currentRoute.loading && !route) {
     return (
-      <section className="card">
+      <section>
         <p className="eyebrow">MINHA ROTA</p>
-        <p>Carregando rota...</p>
+        <div className="empty-state">
+          <strong>Carregando rota...</strong>
+        </div>
       </section>
     )
   }
 
   if (!route) {
     return (
-      <section className="card">
+      <section>
         <p className="eyebrow">MINHA ROTA</p>
-        <h2>Nenhuma rota atribuída no momento.</h2>
-        {currentRoute.error && <div className="error">{currentRoute.error}</div>}
-        <button type="button" className="secondary" onClick={() => void currentRoute.refresh()}>
-          Atualizar
-        </button>
+        <div className="empty-state">
+          <strong>Nenhuma rota atribuída no momento.</strong>
+          {currentRoute.error && <div className="error">{currentRoute.error}</div>}
+          <button type="button" className="secondary" onClick={() => void currentRoute.refresh()}>
+            Atualizar
+          </button>
+        </div>
       </section>
     )
   }
