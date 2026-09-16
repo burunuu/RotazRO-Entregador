@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { captureError } from '../lib/observability/capture'
 
 export type PresenceStatus = 'online' | 'offline'
 
@@ -30,6 +31,6 @@ export async function updateMyPresence(
     })
     if (error) throw error
   } catch (error) {
-    console.error('ERRO_UPDATE_PRESENCE:', error)
+    captureError(error, { event: 'gps.presence_update_failed' })
   }
 }

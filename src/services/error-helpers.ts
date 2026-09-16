@@ -3,10 +3,19 @@
  * instâncias de `Error` — são objetos simples com {message, details, hint,
  * code}. Usar `err instanceof Error` neles sempre cai no fallback genérico,
  * escondendo a causa real (ex.: RPC inexistente, RLS negando, constraint
- * violada). Este helper sempre loga o erro completo no console (nunca
- * segredos — supabase-js nunca inclui chaves/tokens no corpo do erro) e
- * devolve a melhor mensagem disponível para mostrar na UI.
+ * violada). Este helper sempre loga o erro completo (nunca segredos —
+ * supabase-js nunca inclui chaves/tokens no corpo do erro), captura no
+ * Sentry se configurado, e devolve a melhor mensagem disponível pra UI.
+ *
+ * Nota de precisão (documentada em docs/ROTazRO_OBSERVABILITY.md): este
+ * helper é usado tanto para falhas genuinamente inesperadas quanto para
+ * resultados de negócio já esperados (ex.: "esta oferta já foi aceita" —
+ * uma corrida normal, não um bug). Diferente do repo Web (que distingue
+ * P0001 de erro inesperado explicitamente), aqui todo erro passa por
+ * captureError — aceito como imprecisão conhecida por agora, não uma
+ * falha de projeto.
  */
+import { captureError } from '../lib/observability/capture'
 
 interface PostgrestLikeError {
   message?: string
@@ -22,16 +31,14 @@ function isPostgrestLike(value: unknown): value is PostgrestLikeError {
 /** Loga {rpc, code, message, details, hint} e devolve uma mensagem de UI. */
 export function describeError(err: unknown, context: string, fallback: string): string {
   if (err instanceof Error) {
-    console.error(`ERRO_${context}:`, err.message, err)
+    captureError(err, { event: `app.${context.toLowerCase()}` })
     return err.message || fallback
   }
 
   if (isPostgrestLike(err)) {
-    console.error(`ERRO_${context}:`, {
-      code: err.code ?? null,
-      message: err.message ?? null,
-      details: err.details ?? null,
-      hint: err.hint ?? null,
+    captureError(new Error(err.message ?? 'unknown_postgrest_error'), {
+      event: `app.${context.toLowerCase()}`,
+      extra: { code: err.code ?? null, details: err.details ?? null, hint: err.hint ?? null },
     })
     // PGRST202/PGRST116 e "does not exist" indicam RPC/tabela ausente no
     // ambiente atual (ex.: backend remoto sem a migration aplicada) — vale
@@ -43,6 +50,6 @@ export function describeError(err: unknown, context: string, fallback: string): 
     return msg || fallback
   }
 
-  console.error(`ERRO_${context}:`, err)
+  captureError(err, { event: `app.${context.toLowerCase()}` })
   return fallback
 }

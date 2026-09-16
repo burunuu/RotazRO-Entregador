@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Environment variables (never commit real values — see .env.example)
+.env
+.env.local
+.env.*.local
+
 # Local MCP server config (machine-specific, no secrets but not meant to be shared)
 .mcp.json
 

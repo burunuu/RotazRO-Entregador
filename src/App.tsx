@@ -16,6 +16,8 @@ import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
 import { fetchMyActiveRoute } from './services/routes'
 import { formatDuration, routeStatusLabel } from './lib/format'
+import { captureError } from './lib/observability/capture'
+import { logger } from './lib/observability/logger'
 import './App.css'
 
 const LOCATION_SYNC_INTERVAL_MS = 8000
@@ -764,7 +766,7 @@ function App() {
     // habilita-os a participar do despacho regional futuramente, sem exigir
     // nenhuma ação extra deles agora. Nunca bloqueia o login se falhar.
     ensureDriverProfile().catch((error) =>
-      console.error('ERRO_ENSURE_DRIVER_PROFILE:', error),
+      captureError(error, { event: 'auth.ensure_driver_profile_failed' }),
     )
 
     return typedDriver
@@ -946,10 +948,7 @@ function App() {
 
       setHistory(normalized)
     } catch (error) {
-      console.error(
-        'ERRO_HISTORICO:',
-        error,
-      )
+      captureError(error, { event: 'route.history_load_failed' })
 
       const message =
         error &&
@@ -1111,10 +1110,10 @@ function App() {
           ? String(error.message)
           : 'Não foi possível entrar.'
 
-      console.error(
-        'ERRO_LOGIN:',
-        error,
-      )
+      // Erro de negócio esperado (senha errada etc.) não é exceção — vira
+      // log estruturado, não evento no Sentry. Ver
+      // docs/ROTazRO_OBSERVABILITY.md, "AUTH".
+      logger.warn('auth.login_failed', { message })
 
       setAuthError(message)
       setAuthenticated(false)
@@ -1206,10 +1205,7 @@ function App() {
         'Perfil atualizado. As alterações também ficam disponíveis para o restaurante.',
       )
     } catch (error) {
-      console.error(
-        'ERRO_SALVAR_PERFIL:',
-        error,
-      )
+      captureError(error, { event: 'profile.save_failed' })
 
       const message =
         error &&
@@ -1354,10 +1350,7 @@ function App() {
           ? String(error.message)
           : 'Falha ao enviar localização.'
 
-      console.error(
-        'ERRO_SYNC_GPS:',
-        error,
-      )
+      captureError(error, { event: 'gps.foreground_location_error' })
 
       setSyncError(message)
 
@@ -1527,10 +1520,13 @@ function App() {
 
         (position, error) => {
           if (error) {
-            console.error(
-              'ERRO_BACKGROUND_GPS:',
-              error,
-            )
+            // Permissão negada é uma escolha esperada do usuário, não uma
+            // exceção — vira log estruturado, não evento no Sentry.
+            if (error.code === 'NOT_AUTHORIZED') {
+              logger.warn('gps.location_permission_denied', { source: 'background' })
+            } else {
+              captureError(error, { event: 'gps.background_location_error' })
+            }
 
             setGpsError(
               error.message ||
@@ -1581,10 +1577,7 @@ function App() {
           ? String(error.message)
           : 'Não foi possível iniciar o trabalho.'
 
-      console.error(
-        'ERRO_GPS:',
-        error,
-      )
+      captureError(error, { event: 'gps.start_work_failed' })
 
       try {
         await BackgroundGeolocation.stop()
@@ -1660,15 +1653,12 @@ function App() {
       // entregador puramente regional (sem conta de "entregador da loja"),
       // igual o próprio update_my_driver_location já não tem.
       void supabase.rpc('clear_my_driver_location').then(({ error }) => {
-        if (error) console.error('ERRO_LIMPAR_LOCALIZACAO:', error)
+        if (error) captureError(error, { event: 'gps.clear_location_failed' })
       })
 
       return true
     } catch (error) {
-      console.error(
-        'ERRO_PARAR_GPS:',
-        error,
-      )
+      captureError(error, { event: 'gps.stop_work_failed' })
 
       const message =
         error &&
@@ -2231,7 +2221,7 @@ function App() {
                   }
                   await stopGps()
                 } catch (err) {
-                  console.error('ERRO_CHECAR_ROTA_ATIVA:', err)
+                  captureError(err, { event: 'route.check_active_route_failed' })
                   // Falha ao checar: não presume "sem rota" — evita permitir
                   // ficar offline durante uma rota real só porque a
                   // checagem falhou por rede. O usuário pode tentar de novo.

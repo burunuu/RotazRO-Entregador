@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchMyActiveRoute, nextPendingStop, type MyRoute } from '../services/routes'
+import { captureError } from '../lib/observability/capture'
 
 /**
  * Polling moderado (7s) para detectar automaticamente uma rota
@@ -50,7 +51,7 @@ export function useAssignedRoute(enabled: boolean) {
           setJustAssignedRouteId(next.id)
         }
       } catch (err) {
-        if (!cancelled) console.error('ERRO_POLL_ROTA_ATRIBUIDA:', err)
+        if (!cancelled) captureError(err, { event: 'route.poll_assigned_route_failed' })
       }
     }
 
