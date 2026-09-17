@@ -16,16 +16,21 @@ import { logger } from '../lib/observability/logger'
  */
 
 /**
- * Este build NÃO tem google-services.json (Firebase ainda não configurado
- * manualmente — ver relatório de handoff). Chamar qualquer API nativa de
- * push (checkPermissions/requestPermissions/register) sem o FirebaseApp
- * inicializado pode lançar uma IllegalStateException dentro do SDK do
- * Firebase em uma thread nativa fora do alcance de qualquer try/catch em
- * JavaScript — derrubando o app inteiro (crash nativo, não capturável).
- * Mantém a flag central aqui: assim que google-services.json existir no
- * projeto, troque para true — nenhuma outra mudança de código é necessária.
+ * Habilitado em 2026-09-20: `google-services.json` confirmado presente em
+ * `android/app/`, JSON válido, `package_name` confere com
+ * `com.rotazro.entregador` (validado por script, sem imprimir nenhum campo
+ * sensível do arquivo). Backend remoto (migration + Edge Function +
+ * secrets + settings do banco) configurado na mesma rodada — ver
+ * docs/ROTazRO_PUSH_NOTIFICATIONS.md.
+ *
+ * Histórico da flag: chamar qualquer API nativa de push
+ * (checkPermissions/requestPermissions/register) sem o FirebaseApp
+ * inicializado (sem `google-services.json`) podia lançar uma
+ * IllegalStateException dentro do SDK do Firebase numa thread nativa, fora
+ * do alcance de qualquer try/catch em JavaScript — derrubando o app
+ * inteiro. Essa condição não existe mais.
  */
-const PUSH_NOTIFICATIONS_ENABLED = false
+const PUSH_NOTIFICATIONS_ENABLED = true
 
 let listenersRegistered = false
 let currentPushToken: string | null = null
