@@ -17,6 +17,13 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Firebase config — the API key inside is restricted by package name/SHA
+# fingerprint on the Google Cloud Console side (not a raw secret like the
+# service account key), but this project treats every Google/Firebase
+# credential conservatively and keeps it local-only, same as .env. Ships
+# inside the built APK, never in version control.
+android/app/google-services.json
+
 # Local MCP server config (machine-specific, no secrets but not meant to be shared)
 .mcp.json
 
