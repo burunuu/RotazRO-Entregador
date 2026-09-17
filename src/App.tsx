@@ -314,6 +314,13 @@ function App() {
   const [loginLoading, setLoginLoading] = useState(false)
 
   const [driver, setDriver] = useState<Driver | null>(null)
+  // driver_profiles.id — DISTINCT from driver?.id, which is drivers.id (the
+  // org-scoped "loja" identity, correct for routes/presence) for any driver
+  // linked via driver_accounts. Only this id may ever be passed to
+  // registerForPush(): driver_devices.driver_profile_id references
+  // driver_profiles, not drivers — passing driver.id there was the exact
+  // root cause of every push registration 403'ing for "loja" drivers.
+  const [driverProfileId, setDriverProfileId] = useState<string | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
 
   // =========================================================
@@ -425,8 +432,8 @@ function App() {
   const assignedRoute = useAssignedRoute(authenticated)
 
   useEffect(() => {
-    if (!authenticated || !driver) return
-    void registerForPush(driver.id)
+    if (!authenticated || !driverProfileId) return
+    void registerForPush(driverProfileId)
     return onNotificationOpened((payload) => {
       // O payload do push só serve de gatilho — o estado real é sempre
       // buscado de novo do banco, nunca confiado diretamente. Isso apenas
@@ -451,7 +458,7 @@ function App() {
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, driver?.id])
+  }, [authenticated, driverProfileId])
 
   // =========================================================
   // SINCRONIZAÇÃO
@@ -745,6 +752,7 @@ function App() {
       }
 
       setDriver(regionalDriver)
+      setDriverProfileId(profile.id)
       populateProfile(regionalDriver)
 
       return regionalDriver
@@ -777,11 +785,13 @@ function App() {
     populateProfile(typedDriver)
 
     // Também garante um driver_profiles para entregadores "da loja" —
-    // habilita-os a participar do despacho regional futuramente, sem exigir
-    // nenhuma ação extra deles agora. Nunca bloqueia o login se falhar.
-    ensureDriverProfile().catch((error) =>
-      captureError(error, { event: 'auth.ensure_driver_profile_failed' }),
-    )
+    // habilita-os a participar do despacho regional futuramente e é o que
+    // registerForPush() precisa (driver_devices.driver_profile_id aponta
+    // para driver_profiles, não para drivers). Nunca bloqueia o login se
+    // falhar: só popula driverProfileId quando/se resolver.
+    ensureDriverProfile()
+      .then((profile) => setDriverProfileId(profile.id))
+      .catch((error) => captureError(error, { event: 'auth.ensure_driver_profile_failed' }))
 
     return typedDriver
   }
@@ -1068,6 +1078,7 @@ function App() {
         setAuthError(message)
         setAuthenticated(false)
         setDriver(null)
+        setDriverProfileId(null)
       } finally {
         if (mounted) {
           setLoadingSession(false)
@@ -1132,6 +1143,7 @@ function App() {
       setAuthError(message)
       setAuthenticated(false)
       setDriver(null)
+      setDriverProfileId(null)
     } finally {
       setLoginLoading(false)
     }
@@ -1709,14 +1721,15 @@ function App() {
       return
     }
 
-    // Precisa rodar antes do signOut: a revogação do token grava em
-    // driver_devices via RLS, que exige a sessão ainda autenticada.
+    // Precisa rodar antes do signOut: revoke_my_driver_device() resolve o
+    // dono do token via auth.uid(), que exige a sessão ainda autenticada.
     await unregisterPush()
 
     await supabase.auth.signOut()
 
     setAuthenticated(false)
     setDriver(null)
+    setDriverProfileId(null)
     setLocation(null)
 
     setEmail('')

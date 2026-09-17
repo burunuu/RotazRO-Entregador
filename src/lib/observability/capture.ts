@@ -76,6 +76,31 @@ export function captureError(
   }
 }
 
+/**
+ * Captures a Sentry Issue/Event for an expected, informational milestone —
+ * NOT an exception (use captureError for that). Same no-op-without-Sentry
+ * guarantee, same context shape. Independent of `enableLogs` in
+ * sentry.init.ts — that flag gates the separate Sentry Logs product; this
+ * uses the classic Issues/Events pipeline (Sentry.captureMessage), which
+ * has always been on.
+ */
+export function captureMessage(
+  message: string,
+  context: ObservabilityContext & { level?: "info" | "warning" | "error" } = {},
+) {
+  const { level = "info", ...rest } = context;
+  logger.info(message, contextToFields(rest));
+  if (!sentryEnabled) return;
+  try {
+    Sentry.withScope((scope) => {
+      applyContext(scope, rest);
+      Sentry.captureMessage(message, level);
+    });
+  } catch {
+    // Observability must never be the reason a real error goes unhandled.
+  }
+}
+
 function contextToFieldsSafe(context: ObservabilityContext): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(contextToFields(context))) {

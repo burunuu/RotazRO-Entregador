@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { PushNotifications } from '@capacitor/push-notifications'
 import type { PushNotificationSchema, ActionPerformed, Token } from '@capacitor/push-notifications'
 import { supabase } from '../lib/supabase'
-import { captureError } from '../lib/observability/capture'
+import { captureError, captureMessage } from '../lib/observability/capture'
 import { logger } from '../lib/observability/logger'
 
 /**
@@ -38,25 +38,54 @@ const PUSH_NOTIFICATIONS_ENABLED = true
  * leave PushNotifications.register() hanging with neither event ever firing. */
 const PUSH_REGISTRATION_TIMEOUT_S = 15
 
+/**
+ * TEMPORARY diagnostic instrumentation for the "driver_devices stays empty"
+ * investigation — set VITE_PUSH_DIAGNOSTICS=1 to make the FCM registration
+ * flow's critical states show up as Sentry Issues (not the separate Sentry
+ * Logs product, which stays off — see capture.ts's captureMessage). Off by
+ * default: adds zero events, zero overhead. Remove this flag and the diag()/
+ * diagError() calls once registration is confirmed working end to end on a
+ * real device.
+ */
+const PUSH_DIAGNOSTICS_ENABLED = import.meta.env.VITE_PUSH_DIAGNOSTICS === '1'
+
+function diag(event: string, context: Parameters<typeof captureMessage>[1] = {}) {
+  if (!PUSH_DIAGNOSTICS_ENABLED) return
+  captureMessage(event, context)
+}
+
+function diagError(error: unknown, context: Parameters<typeof captureError>[1] = {}) {
+  if (!PUSH_DIAGNOSTICS_ENABLED) return
+  captureError(error, { ...context, force: true })
+}
+
 let listenersRegistered = false
 let currentPushToken: string | null = null
 
+/**
+ * Persiste o token via RPC (register_my_driver_device — ver migration
+ * 20260920030000), não por INSERT/UPSERT direto na tabela. A RPC deriva o
+ * driver_profile_id do próprio auth.uid() internamente e ignora qualquer id
+ * vindo do cliente — `driverProfileId` aqui serve só para marcar os eventos
+ * de diagnóstico no Sentry, nunca é enviado ao banco. Isso elimina de raiz a
+ * classe de bug em que este parâmetro acaba sendo drivers.id em vez de
+ * driver_profiles.id (o que já aconteceu — ver commit que introduziu esta
+ * RPC): mesmo que aconteça de novo, a RPC simplesmente ignora o valor.
+ */
 async function upsertDeviceToken(driverProfileId: string, token: string) {
   const platform = Capacitor.getPlatform() === 'ios' ? 'ios' : 'android'
-  const { error } = await supabase.from('driver_devices').upsert(
-    {
-      driver_profile_id: driverProfileId,
-      platform,
-      push_token: token,
-      last_seen_at: new Date().toISOString(),
-      revoked_at: null,
-    },
-    { onConflict: 'push_token' },
-  )
-  if (error) throw error
+  const { error } = await supabase.rpc('register_my_driver_device', {
+    _push_token: token,
+    _platform: platform,
+  })
+  if (error) {
+    diagError(error, { event: 'push.device_save_error', driver_profile_id: driverProfileId, extra: { platform } })
+    throw error
+  }
   // Never logs the token itself — event + driver id is enough to confirm
   // "registration worked" without turning the log into a token dump.
   logger.info('push.token_registered', { platform })
+  diag('push.device_save_success', { driver_profile_id: driverProfileId, extra: { platform } })
 }
 
 /** Único canal usado hoje — importância alta porque uma oferta expira em
@@ -79,10 +108,10 @@ async function ensureNotificationChannel() {
 }
 
 async function revokeDeviceToken(token: string) {
-  await supabase
-    .from('driver_devices')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('push_token', token)
+  // RPC (revoke_my_driver_device) rather than a direct UPDATE — same
+  // rationale as register_my_driver_device: it only ever touches a device
+  // row whose driver_profiles.user_id is the caller's own auth.uid().
+  await supabase.rpc('revoke_my_driver_device', { _push_token: token })
 }
 
 /**
@@ -94,6 +123,8 @@ async function revokeDeviceToken(token: string) {
 export async function registerForPush(driverProfileId: string): Promise<void> {
   if (!Capacitor.isNativePlatform() || !PUSH_NOTIFICATIONS_ENABLED) return
 
+  diag('push.registration_started', { driver_profile_id: driverProfileId })
+
   try {
     const permission = await PushNotifications.checkPermissions()
     let status = permission.receive
@@ -101,6 +132,7 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
       const requested = await PushNotifications.requestPermissions()
       status = requested.receive
     }
+    diag('push.permission_result', { driver_profile_id: driverProfileId, extra: { status } })
     if (status !== 'granted') {
       // Usuário negou — escolha dele, não um bug do app (mesmo padrão já
       // usado para permissão de GPS em App.tsx).
@@ -115,6 +147,8 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
 
       PushNotifications.addListener('registration', (token: Token) => {
         currentPushToken = token.value
+        // Never the token itself — see upsertDeviceToken's own comment.
+        diag('push.registration_success', { driver_profile_id: driverProfileId })
         void upsertDeviceToken(driverProfileId, token.value).catch((err) =>
           captureError(err, { event: 'push.register_token_failed' }),
         )
@@ -122,6 +156,7 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
 
       PushNotifications.addListener('registrationError', (err) => {
         captureError(err, { event: 'push.registration_failed' })
+        diagError(err, { event: 'push.registration_error', driver_profile_id: driverProfileId })
       })
     }
 
@@ -129,6 +164,11 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
     setTimeout(() => {
       if (!currentPushToken) {
         logger.warn('push.registration_timeout', { seconds: PUSH_REGISTRATION_TIMEOUT_S })
+        diag('push.registration_timeout', {
+          driver_profile_id: driverProfileId,
+          extra: { seconds: PUSH_REGISTRATION_TIMEOUT_S },
+          level: 'warning',
+        })
       }
     }, PUSH_REGISTRATION_TIMEOUT_S * 1000)
   } catch (error) {
