@@ -32,6 +32,12 @@ import { logger } from '../lib/observability/logger'
  */
 const PUSH_NOTIFICATIONS_ENABLED = true
 
+/** How long to wait for the native 'registration'/'registrationError' callback
+ * before logging that it never came — some Android/Google Play Services
+ * combinations (e.g. emulators without a genuine, signed-in Play Store) can
+ * leave PushNotifications.register() hanging with neither event ever firing. */
+const PUSH_REGISTRATION_TIMEOUT_S = 15
+
 let listenersRegistered = false
 let currentPushToken: string | null = null
 
@@ -120,6 +126,11 @@ export async function registerForPush(driverProfileId: string): Promise<void> {
     }
 
     await PushNotifications.register()
+    setTimeout(() => {
+      if (!currentPushToken) {
+        logger.warn('push.registration_timeout', { seconds: PUSH_REGISTRATION_TIMEOUT_S })
+      }
+    }, PUSH_REGISTRATION_TIMEOUT_S * 1000)
   } catch (error) {
     captureError(error, { event: 'push.setup_failed' })
   }
