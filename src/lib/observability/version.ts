@@ -6,6 +6,7 @@
  */
 declare const __ROTAZRO_COMMIT__: string | undefined;
 declare const __ROTAZRO_PKG_VERSION__: string | undefined;
+declare const __ROTAZRO_VERSION_CODE__: string | undefined;
 
 export function appCommit(): string {
   try {
@@ -25,8 +26,30 @@ export function appPackageVersion(): string {
   }
 }
 
+/** android/app/build.gradle's versionCode — the Play Store's own build
+ * number, injected the same way as commit/package version (see
+ * vite.config.ts). Falls back to "0" for local `vite dev`. */
+export function appVersionCode(): string {
+  try {
+    return typeof __ROTAZRO_VERSION_CODE__ !== "undefined" && __ROTAZRO_VERSION_CODE__
+      ? __ROTAZRO_VERSION_CODE__
+      : "0";
+  } catch {
+    return "0";
+  }
+}
+
+/** `rotazro-entregador@<versionName>+<versionCode>` — mirrors the Play
+ * Store's own version identifiers exactly, so a release in Sentry always
+ * matches what's visible in the Play Console/APK itself. The git commit
+ * (appCommit()) is attached separately as the `git_commit` tag in
+ * sentry.init.ts's initialScope rather than folded into the release string
+ * — GitHub suspect-commit correlation doesn't depend on the release name
+ * containing a SHA (it comes from the source-maps upload step's
+ * `setCommits`, see docs/ROTazRO_OBSERVABILITY.md, "Source maps"), so
+ * nothing is lost by using versionCode here instead. */
 export function appRelease(): string {
-  return `rotazro-entregador@${appPackageVersion()}+${appCommit()}`;
+  return `rotazro-entregador@${appPackageVersion()}+${appVersionCode()}`;
 }
 
 /**

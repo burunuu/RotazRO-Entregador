@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appEnvironment, appTracesSampleRate } from "../version";
+import { appEnvironment, appRelease, appTracesSampleRate } from "../version";
 
 describe("appEnvironment", () => {
   afterEach(() => {
@@ -41,5 +41,14 @@ describe("appTracesSampleRate", () => {
   it("falls back to the default on a non-numeric value", () => {
     vi.stubEnv("VITE_SENTRY_TRACES_SAMPLE_RATE", "not-a-number");
     expect(appTracesSampleRate()).toBe(0.1);
+  });
+});
+
+describe("appRelease", () => {
+  it("uses packageVersion+versionCode, matching what's visible in the Play Console/APK itself", () => {
+    // Not hardcoding the current version/versionCode — this just locks the
+    // shape (rotazro-entregador@<versionName>+<versionCode>), which is what
+    // this round explicitly changed away from a git-commit suffix.
+    expect(appRelease()).toMatch(/^rotazro-entregador@\d+\.\d+\.\d+\+\d+$/);
   });
 });

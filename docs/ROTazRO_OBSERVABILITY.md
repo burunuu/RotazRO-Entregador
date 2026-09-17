@@ -83,6 +83,10 @@ Mesma base do Web (`src/lib/observability/sanitize.ts`) — strip estrutural de 
 
 Revalidado nesta rodada: `src/lib/observability/__tests__/sanitize.test.ts` continua cobrindo Authorization/Cookie, segredos, PII, **GPS**, `contexts`/`breadcrumbs` e o caso no-op — todos os 6 testes passando.
 
+### Data collection (novo, rodada 3) — defesa em profundidade, com uma ressalva nativa importante
+
+Mesma configuração `dataCollection` do Web (`sentry.init.ts`): `userInfo`/`cookies`/`httpBodies`/`urlQueryParams`/`genAI`/`databaseQueryData`/`stackFrameVariables` todos desabilitados, `enableLogs: false`. **Ressalva documentada no próprio type do `@sentry/capacitor@4.3.0`** (`CapacitorOptions`, confirmado nos `.d.ts` instalados): `dataCollection` é totalmente respeitado na camada JS (fetch/XHR, captura de request deste SDK), mas **na camada nativa (Android/iOS) só `userInfo` é repassado** (como `sendDefaultPii` nativo) — as demais categorias não têm efeito sobre o que o crash handler nativo captura. Na prática isso não é uma lacuna real: um crash nativo carrega estado de processo/dispositivo/stack trace, não headers HTTP/cookies/corpo de requisição — não há o que essas categorias precisariam suprimir nesse caminho. Ver seção 15 (Native crash) para os detalhes de como o SDK nativo é (ou não) inicializado.
+
 ---
 
 ## 5. Offline vs erro real
@@ -109,7 +113,9 @@ Revalidado nesta rodada: `src/lib/observability/__tests__/sanitize.test.ts` cont
 
 - `__ROTAZRO_COMMIT__` — hash curto do git, injetado via `vite.config.ts`'s `define` (mesmo padrão do Web). Cai em `"unknown"` se `git rev-parse` falhar no build.
 - `__ROTAZRO_PKG_VERSION__` — versão de `package.json`, injetada do mesmo jeito.
-- **Baseline de pré-piloto (2026-09-19)**: `package.json.version` corrigido de `"0.0.0"` para `"0.1.0"`, `android/app/build.gradle` de `versionCode 1`/`versionName "1.0"` (nunca incrementados desde a criação do projeto) para `versionCode 2`/`versionName "0.1.0"`. `appRelease()` monta `rotazro-entregador@0.1.0+<commit>` — build identificável tanto pela versão quanto pelo commit exato (esse formato foi mantido deliberadamente em vez de usar `versionCode` na release: o commit é o que permite ao Sentry correlacionar com o GitHub — ver seção 8 — enquanto `versionCode`/`versionName` continuam existindo separadamente para o Play Console).
+- `__ROTAZRO_VERSION_CODE__` (novo, rodada 3) — `versionCode` lido de `android/app/build.gradle` via regex simples (um inteiro numa linha só, não justifica um parser de Gradle de verdade), injetado do mesmo jeito. Cai em `"0"` se a leitura falhar.
+- **Baseline de pré-piloto (2026-09-19)**: `package.json.version` corrigido de `"0.0.0"` para `"0.1.0"`, `android/app/build.gradle` de `versionCode 1`/`versionName "1.0"` (nunca incrementados desde a criação do projeto) para `versionCode 2`/`versionName "0.1.0"`.
+- **Formato da release — alterado nesta rodada**: `appRelease()` agora monta `rotazro-entregador@<versionName>+<versionCode>` (ex.: `rotazro-entregador@0.1.0+2`) em vez do formato anterior baseado no commit (`@0.1.0+<commit>`). Motivo da troca: esse formato espelha exatamente o que aparece no Play Console/no próprio APK instalado, o que facilita cruzar "qual build o usuário tem" com "qual release no Sentry" sem precisar de `git log`. Nada se perde na correlação com o GitHub: o `setCommits`/"Suspect Commits" do Sentry funciona a partir do commit do `HEAD` no momento do upload de source maps (seção 8), não a partir de uma SHA embutida na string da release — o commit continua visível, só que agora como a tag `git_commit` (`sentry.init.ts`'s `initialScope.tags`) em vez de fazer parte do nome da release.
 - **Como incrementar daqui pra frente** (manual, deliberadamente simples — não criar automação agora): a cada build destinada a um piloto/release,
   1. bumpar `package.json.version` (semver: `0.1.0` → `0.2.0` para mudança relevante, `0.1.1` para um fix pontual);
   2. incrementar `android/app/build.gradle`'s `versionCode` em +1 (inteiro sequencial, é o que o Android usa para saber se uma build é "mais nova" que outra — nunca pode diminuir nem repetir);
@@ -141,7 +147,7 @@ export default defineConfig({
           sentryVitePlugin({
             // org/project também podem vir de SENTRY_ORG/SENTRY_PROJECT
             // no ambiente — não é obrigatório passá-los aqui.
-            release: { name: `rotazro-entregador@${packageVersion()}+${gitShortHash()}`, setCommits: { auto: true } },
+            release: { name: appRelease(), setCommits: { auto: true } }, // rotazro-entregador@<versionName>+<versionCode>
           }),
         ]
       : []),
@@ -152,11 +158,17 @@ export default defineConfig({
 ```
 
 **Variáveis necessárias só no ambiente de build** (nunca no bundle do APK, nunca commitadas):
-- `SENTRY_AUTH_TOKEN` — token de organização do Sentry, escopo `project:releases` + `project:write`.
-- `SENTRY_ORG` — slug da organização.
-- `SENTRY_PROJECT` — slug do projeto "RotazRO Entregador" (diferente do projeto "RotazRO Web" — ver seção 12).
+- `SENTRY_AUTH_TOKEN` — token de organização do Sentry, escopo `project:releases` + `project:write`. **Não criado/coletado nesta rodada.**
+- `SENTRY_ORG` — **confirmado: `rotazro`** (mesma organização do projeto Web). Não é segredo, mas `.env.example` mantém vazio por convenção do arquivo.
+- `SENTRY_PROJECT` — slug do projeto "RotazRO Entregador" (diferente do projeto "RotazRO Web" — ver seção 12). **Ainda não confirmado** — não inventado, deixado configurável.
 
-**Não fazer upload real nesta rodada** — nenhum desses três valores está configurado. Quando o token existir, rodar `npm run build` uma vez localmente para confirmar o upload antes de qualquer automação de release para a Play Store.
+**Não fazer upload real nesta rodada** — `SENTRY_AUTH_TOKEN`/`SENTRY_PROJECT` não estão configurados. Quando existirem, rodar `npm run build` uma vez localmente para confirmar o upload antes de qualquer automação de release para a Play Store.
+
+### Symbols nativos (Android) — futuro, nada necessário hoje
+
+Separado dos source maps JS acima:
+- **ProGuard/R8**: `android/app/build.gradle` tem `minifyEnabled false` no build de release (confirmado por leitura) — o app não ofusca/minifica código Java/Kotlin hoje, então não existe `mapping.txt` para enviar e stack traces nativas já vêm legíveis. **Se `minifyEnabled` for mudado para `true` no futuro** (redução de tamanho do APK, por exemplo), aí sim será necessário automatizar o upload do `mapping.txt` gerado a cada build de release para o Sentry (via `sentry-cli upload-proguard` ou o Sentry Gradle plugin) — documentado aqui como pendência futura, não implementado agora por não haver necessidade concreta.
+- **NDK/símbolos nativos C/C++**: este app não tem código nativo próprio além dos plugins Capacitor padrão (Geolocation, Push Notifications, Background Geolocation, Sentry) — nenhum deles introduz binário NDK customizado que precise de upload de símbolos `.so`. Não aplicável hoje.
 
 ---
 
@@ -209,8 +221,8 @@ Ver `.env.example` (novo nesta rodada — o repo não tinha um antes). Todas opc
 | `VITE_SENTRY_ENVIRONMENT` | `version.ts` | Não — ver seção 7 para o fallback. |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | `version.ts` | Não — padrão 0.1 (seção 10). |
 | `SENTRY_AUTH_TOKEN` | Só ambiente de build, se/quando o `@sentry/vite-plugin` (seção 8) for adicionado | Não. **Nunca em `VITE_*`, nunca no runtime/APK instalado.** |
-| `SENTRY_ORG` | Só ambiente de build | Não — só usado pelo plugin de source maps. |
-| `SENTRY_PROJECT` | Só ambiente de build | Não — deve apontar para o projeto "RotazRO Entregador", não o "RotazRO Web". |
+| `SENTRY_ORG` | Só ambiente de build | Não — **confirmado: `rotazro`**. |
+| `SENTRY_PROJECT` | Só ambiente de build | Não — deve apontar para o projeto "RotazRO Entregador", não o "RotazRO Web". **Ainda não confirmado**, não inventado. |
 
 Não existia `SENTRY_AUTH_TOKEN` neste repo antes — se configurado no futuro, nunca deve ir para uma variável `VITE_*` (viraria parte do APK instalado, legível por qualquer um que descompile o bundle).
 
@@ -239,20 +251,39 @@ Este repo **não tinha runner de testes configurado** antes da rodada anterior (
 - `sanitize.test.ts` — headers de auth removidos, chaves de segredo/PII/**GPS** redigidas (incluindo aninhadas), contexts/breadcrumbs sanitizados, no-op em evento limpo.
 - `logger.test.ts` — forma da linha JSON, roteamento por nível, debug silencioso por padrão, chamada sem `fields`.
 - `capture.test.ts` — **confirma que com Sentry desabilitado (sem DSN, o estado padrão), `captureError`/`addBreadcrumbSafe` nunca lançam exceção e continuam logando localmente**.
-- `version.test.ts` (novo nesta rodada) — `appEnvironment()` respeita a variável explícita e nunca reporta `"production"` por padrão rodando em dev; `appTracesSampleRate()` respeita um override válido e cai no padrão de 0.1 para valor ausente/inválido/fora de faixa.
+- `version.test.ts` — `appEnvironment()` respeita a variável explícita e nunca reporta `"production"` por padrão rodando em dev; `appTracesSampleRate()` respeita um override válido e cai no padrão de 0.1 para valor ausente/inválido/fora de faixa; **`appRelease()` segue o formato `rotazro-entregador@<versionName>+<versionCode>` (novo, rodada 3)**.
 
-21 testes, todos passando nesta rodada (`npm test`).
+22 testes, todos passando nesta rodada (`npm test`).
 
 ---
 
-## 15. Configuração manual necessária (nada disto foi feito automaticamente)
+## 15. Auditoria contra a documentação oficial do Sentry (rodada 3, 2026-09-19)
+
+Metodologia: leitura do código real + inspeção direta dos `.d.ts` instalados (`@sentry/capacitor@4.3.0`, `@sentry/core@10.69.0` — uma versão um pouco atrás da do Web, `10.74.0`; confirmado que `dataCollection`/`enableLogs` já existem em ambas, então nada nesta seção depende da diferença de patch).
+
+| Item | Resultado | Evidência |
+|---|---|---|
+| SDK | `@sentry/capacitor@4.3.0` + `@sentry/react@10.69.0` — padrão oficial `Sentry.init(options, SentryReact.init)` | `sentry.init.ts`. Sem mudança necessária. |
+| **Native crash — habilitado?** | **Sim, por padrão** (`enableNative`/`enableNativeCrashHandling` default `true` em `CapacitorOptions`) — não alterado, o crash nativo continua ativo. | `node_modules/@sentry/capacitor/dist/build/options.d.ts`. |
+| **Native crash — risco de evento nativo enviado com JS/DSN desativado?** | **Não, confirmado por leitura do código-fonte do SDK**: toda a inicialização do bridge nativo (`enableSyncToNative`, transporte nativo, etc.) acontece **dentro** da função `init()` de `@sentry/capacitor`. Como `initSentry()` (`sentry.init.ts`) retorna antes de chamar essa função quando `VITE_SENTRY_DSN` está ausente, o bridge nativo nunca é tocado — o SDK Android nativo nunca é configurado, nunca instala um handler de crash. | `node_modules/@sentry/capacitor/dist/build/sdk.js`. |
+| **Native crash — offline/cache/duplicidade** | O SDK nativo usa um transporte próprio (`makeNativeTransport`, com buffer) — enfileira eventos no device e reenvia quando a conectividade volta. Isso é **separado** do `isDeviceOffline()`/breadcrumb-downgrade da seção 5 (que atua na camada JS, antes do evento chegar ao transporte). Não há duplicidade: cada evento passa por um transporte só (JS **ou** nativo, dependendo de onde a exceção ocorreu), nunca os dois para o mesmo erro. | `node_modules/@sentry/capacitor/dist/build/sdk.js`, `transports/native.d.ts`. |
+| `dataCollection` | Adicionado nesta rodada, com a ressalva nativa documentada na seção 4. | `sentry.init.ts`. |
+| Session Replay | **Confirmado estruturalmente impossível de ligar por acidente**: `CapacitorOptions` (o tipo do primeiro argumento de `Sentry.init()`) usa `Omit<BrowserOptions, '...' | 'replaysOnErrorSampleRate' | 'replaysSessionSampleRate' | ...>` — essas opções nem aparecem no autocomplete/type-check de quem chama `Sentry.init()` neste SDK. Nenhum `replayIntegration()` em lugar nenhum do código (grep confirmou). | `node_modules/@sentry/capacitor/dist/build/options.d.ts`. |
+| Sentry Logs | Mesmo achado do Web — `enableLogs` default `true` na SDK, nunca usado no código, desabilitado explicitamente nesta rodada. | `sentry.init.ts`. |
+| Release | Alterado nesta rodada — ver seção 7. | `version.ts`. |
+
+**Nenhuma mudança feita sem evidência** — a única alteração de comportamento nesta auditoria (fora do `dataCollection`/`enableLogs`, que são aditivos e conservadores) foi o formato da release, que é uma mudança de string, não de arquitetura.
+
+---
+
+## 16. Configuração manual necessária (nada disto foi feito automaticamente)
 
 1. No projeto Sentry **"RotazRO Entregador"** (já criado manualmente, associado a `burunuu/RotazRO-Entregador` — seção 12): copiar o DSN.
 2. Configurar `VITE_SENTRY_DSN` como variável de ambiente **no processo de build** (nunca em runtime no device).
 3. Opcional: `VITE_SENTRY_ENVIRONMENT=production` explicitamente.
 4. Opcional: `VITE_SENTRY_TRACES_SAMPLE_RATE` se 10% não for o valor desejado.
 5. Depois do DSN configurado: seguir a seção 13 para um evento de teste único, confirmar no painel, remover o código temporário.
-6. Opcional, fora do escopo desta rodada: `SENTRY_AUTH_TOKEN`/`SENTRY_ORG`/`SENTRY_PROJECT` + instalar `@sentry/vite-plugin` (seção 8), para stack traces legíveis e correlação com commits do GitHub.
+6. Opcional, fora do escopo desta rodada: `SENTRY_AUTH_TOKEN` + `SENTRY_PROJECT` (o `SENTRY_ORG` já está confirmado: `rotazro`) + instalar `@sentry/vite-plugin` (seção 8), para stack traces legíveis e correlação com commits do GitHub.
 7. No painel do Sentry: conectar a integração do GitHub (`burunuu/RotazRO-Entregador`) e configurar notificação (e-mail/Slack) para novas issues.
 
 **Este documento não pede para colar nenhum DSN no chat — configure diretamente no ambiente de build.**
