@@ -12,6 +12,11 @@ describe("appEnvironment", () => {
   });
 
   it("never silently reports 'production' while running under vitest/dev", () => {
+    // Explicitly cleared rather than relying on the ambient .env not
+    // setting this — a real local .env (e.g. while testing a real Sentry
+    // DSN) legitimately sets VITE_SENTRY_ENVIRONMENT, which would otherwise
+    // make this test's outcome depend on developer machine state.
+    vi.stubEnv("VITE_SENTRY_ENVIRONMENT", undefined);
     // vitest itself runs with import.meta.env.DEV === true, exercising the
     // same fallback path as `vite dev` — this is the bug this fixes: a
     // local dev session must never claim to be "production" by default.
@@ -25,6 +30,9 @@ describe("appTracesSampleRate", () => {
   });
 
   it("defaults to 0.1 with no override", () => {
+    // Explicitly cleared for the same reason as appEnvironment's dev test —
+    // don't depend on the ambient .env not setting this.
+    vi.stubEnv("VITE_SENTRY_TRACES_SAMPLE_RATE", undefined);
     expect(appTracesSampleRate()).toBe(0.1);
   });
 
