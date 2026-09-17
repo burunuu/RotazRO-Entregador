@@ -15,6 +15,24 @@ const GPS_KEY_PATTERN = /^(latitude|longitude|lat|lng|lon|coords?)$/i;
 
 const REDACTED = "[redacted]";
 
+/**
+ * Sentry's own automatic HTTP/fetch breadcrumb instrumentation records the
+ * full request URL — for every Supabase REST call, that includes the query
+ * string, which is exactly where PostgREST filters put ids (e.g.
+ * `?driver_profile_id=eq.<uuid>` from an .eq(), `?user_id=eq.<uuid>`, an
+ * auth UUID in a path segment's neighboring param, etc). Key-based
+ * redaction alone (above) can't catch this — it never inspects a string
+ * VALUE, and this data was never under a key like "token" to begin with.
+ * This keeps scheme+host+path (still useful: which endpoint, which
+ * method/status stay visible via other breadcrumb fields) and drops
+ * everything from the first "?" onward.
+ */
+const URL_QUERY_STRING_PATTERN = /(https?:\/\/[^\s"'?]+)\?[^\s"']*/gi;
+
+function stripUrlQueries(value: string): string {
+  return value.replace(URL_QUERY_STRING_PATTERN, "$1?[redacted]");
+}
+
 function sanitizeRecord(input: Record<string, unknown> | undefined | null): Record<string, unknown> | undefined {
   if (!input || typeof input !== "object") return input ?? undefined;
   const out: Record<string, unknown> = {};
@@ -25,6 +43,8 @@ function sanitizeRecord(input: Record<string, unknown> | undefined | null): Reco
     }
     if (value && typeof value === "object" && !Array.isArray(value)) {
       out[key] = sanitizeRecord(value as Record<string, unknown>);
+    } else if (typeof value === "string") {
+      out[key] = stripUrlQueries(value);
     } else {
       out[key] = value;
     }
@@ -42,9 +62,10 @@ export interface SanitizableEvent {
 
 export function sanitizeEvent<T extends SanitizableEvent>(event: T): T {
   if (event.request) {
-    const { headers, cookies: _cookies, data: _data, ...restRequest } = event.request;
+    const { headers, cookies: _cookies, data: _data, url, ...restRequest } = event.request;
     event.request = {
       ...restRequest,
+      ...(typeof url === "string" ? { url: stripUrlQueries(url) } : {}),
       ...(headers ? { headers: sanitizeRecord(stripAuthHeaders(headers)) } : {}),
     };
   }
@@ -57,7 +78,11 @@ export function sanitizeEvent<T extends SanitizableEvent>(event: T): T {
     event.contexts = sanitizedContexts;
   }
   if (event.breadcrumbs) {
-    event.breadcrumbs = event.breadcrumbs.map((b) => (b.data ? { ...b, data: sanitizeRecord(b.data) } : b));
+    event.breadcrumbs = event.breadcrumbs.map((b) => ({
+      ...b,
+      ...(b.data ? { data: sanitizeRecord(b.data) } : {}),
+      ...(typeof b.message === "string" ? { message: stripUrlQueries(b.message) } : {}),
+    }));
   }
   return event;
 }

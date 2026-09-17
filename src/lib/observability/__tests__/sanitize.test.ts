@@ -74,6 +74,50 @@ describe("sanitizeEvent", () => {
     expect(result.breadcrumbs?.[0]?.data?.["url"]).toBe("https://x");
   });
 
+  it("strips query strings from URLs in HTTP breadcrumb data — the real leak (ids/UUIDs in PostgREST filters)", () => {
+    const uuid = "db0cfd84-1234-4d56-8abc-1234567890ab";
+    const event = {
+      breadcrumbs: [
+        {
+          category: "fetch",
+          data: {
+            url: `https://xxx.supabase.co/rest/v1/driver_devices?driver_profile_id=eq.${uuid}&on_conflict=push_token`,
+            method: "POST",
+            status_code: 403,
+          },
+        },
+      ],
+    };
+    const result = sanitizeEvent(event);
+    const url = result.breadcrumbs?.[0]?.data?.["url"] as string;
+    expect(url).not.toContain(uuid);
+    expect(url).not.toContain("driver_profile_id");
+    expect(url).toBe("https://xxx.supabase.co/rest/v1/driver_devices?[redacted]");
+    // Method/status (non-identifying) stay visible — sanitizing isn't the
+    // same as deleting all observability value.
+    expect(result.breadcrumbs?.[0]?.data?.["method"]).toBe("POST");
+    expect(result.breadcrumbs?.[0]?.data?.["status_code"]).toBe(403);
+  });
+
+  it("strips a query string embedded in a breadcrumb's message, and in request.url", () => {
+    const uuid = "22222222-2222-2222-2222-222222222222";
+    const event = {
+      request: { url: `https://xxx.supabase.co/auth/v1/user?user_id=${uuid}` },
+      breadcrumbs: [{ category: "fetch", message: `GET https://xxx.supabase.co/rest/v1/drivers?id=eq.${uuid}` }],
+    };
+    const result = sanitizeEvent(event);
+    expect(result.request?.url).toBe("https://xxx.supabase.co/auth/v1/user?[redacted]");
+    const message = result.breadcrumbs?.[0]?.message as string;
+    expect(message).not.toContain(uuid);
+    expect(message).toBe("GET https://xxx.supabase.co/rest/v1/drivers?[redacted]");
+  });
+
+  it("leaves a query-string-free URL untouched (host/path stay useful for debugging)", () => {
+    const event = { breadcrumbs: [{ category: "fetch", data: { url: "https://xxx.supabase.co/rest/v1/routes" } }] };
+    const result = sanitizeEvent(event);
+    expect(result.breadcrumbs?.[0]?.data?.["url"]).toBe("https://xxx.supabase.co/rest/v1/routes");
+  });
+
   it("is a no-op on an event with none of these fields present", () => {
     const event = { message: "hello", level: "info" };
     const result = sanitizeEvent(event);
