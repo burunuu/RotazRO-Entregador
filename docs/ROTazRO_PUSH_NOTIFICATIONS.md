@@ -1,6 +1,6 @@
 # Push Notifications — RotazRO Entregador
 
-> Auditoria de 2026-09-15, arquitetura completa implementada em 2026-09-20 (local, nada aplicado em produção). Status: **preparado, desligado**. `PUSH_NOTIFICATIONS_ENABLED = false` continua `false` — só muda quando `google-services.json` existir de verdade.
+> Auditoria de 2026-09-15, arquitetura implementada em 2026-09-20, backend implantado e habilitado no mesmo dia (rodadas subsequentes). Status: **backend real no ar, `PUSH_NOTIFICATIONS_ENABLED = true`, faltando só o teste em device real**. Ver seção 4 para a correção de arquitetura do armazenamento do secret (GUC → Supabase Vault).
 
 ---
 
@@ -8,14 +8,15 @@
 
 ```ts
 // src/services/notifications.ts
-const PUSH_NOTIFICATIONS_ENABLED = false
+const PUSH_NOTIFICATIONS_ENABLED = true
 ```
 
-Todo o código do lado do APK (registro de token FCM, canal de notificação, listeners de deep-link, revogação no logout) existe e está correto na leitura de código, e agora tem um backend de envio real completo (seção 3) — mas **nada disto executa hoje** porque:
+Todo o código do lado do APK (registro de token FCM, canal de notificação, listeners de deep-link, revogação no logout) existe, está habilitado, e o backend de envio real está implantado (seção 3):
 
-1. A flag acima está `false`.
-2. Não existe `google-services.json` no projeto Android.
-3. O backend (Edge Function + triggers) existe em código mas **não foi implantado** (`supabase functions deploy` nunca rodou) nem configurado (nenhum secret/GUC setado).
+1. `google-services.json` confirmado presente em `android/app/`, package `com.rotazro.entregador` validado.
+2. Migration + Edge Function aplicadas/implantadas no projeto remoto (`haciigmaszlbevdzzmod`).
+3. `FIREBASE_SERVICE_ACCOUNT_JSON`/`PUSH_NOTIFY_SECRET` configurados como secrets da Edge Function.
+4. **Pendente**: inserir o mesmo `PUSH_NOTIFY_SECRET` no Supabase Vault (seção 4) — sem isso, o helper `notify_push_edge_function()` continua em no-op silencioso (nenhum push sai), exatamente como antes de qualquer configuração existir.
 
 ### Por que a flag existe (histórico)
 
@@ -107,50 +108,55 @@ Mesmo padrão para rota atribuída direto pela loja (`routes` `AFTER INSERT OR U
 
 ---
 
-## 4. Banco de dados — migration nova (local, não aplicada em produção)
+## 4. Banco de dados — duas migrations, ambas aplicadas no projeto remoto
 
-`D:\RotazRO\RotazRO\supabase\migrations\20260920000000_push_notifications.sql` (mora no repo Web, onde vive todo o schema compartilhado):
+`D:\RotazRO\RotazRO\supabase\migrations\` (mora no repo Web, onde vive todo o schema compartilhado):
 
+**`20260920000000_push_notifications.sql`** (aplicada):
 1. **`GRANT SELECT, UPDATE ON driver_devices TO service_role`** — a Edge Function precisa ler tokens; `UPDATE` só para marcar `revoked_at` num token que o FCM reportou inválido. **Sem `INSERT`/`DELETE`** — criar/apagar um dispositivo continua sendo só do próprio driver, via a policy RLS já existente (`driver manages own devices`).
-2. **`CREATE EXTENSION IF NOT EXISTS pg_net`** — extensão padrão do Supabase para chamadas HTTP assíncronas a partir de triggers/cron (mesmo mecanismo usado por Database Webhooks internamente).
-3. **`notify_push_edge_function(payload jsonb)`** — helper `SECURITY DEFINER` que lê a URL/secret via `current_setting('app.settings.push_notify_url'/'push_notify_secret', true)` e chama `net.http_post`. **No-op silencioso (não lança) se qualquer uma dessas duas configurações estiver ausente** — aplicar esta migration sem configurar nada não muda nenhum comportamento observável.
+2. **`CREATE EXTENSION IF NOT EXISTS pg_net`** — extensão padrão do Supabase para chamadas HTTP assíncronas a partir de triggers/cron.
+3. **`notify_push_edge_function(payload jsonb)`** — helper `SECURITY DEFINER` que chama `net.http_post`.
 4. **`trg_delivery_offer_push()`** — dispara em toda oferta nova com `status='pending'`.
 5. **`trg_route_assigned_push()`** — dispara quando uma rota é assinada diretamente (`status='confirmed'` + `driver_id` setado, sem que já exista um `delivery_offer` aceito pra essa rota — evita notificar duas vezes a mesma rota quando ela vem do fluxo regional).
+
+**`20260920010000_push_notification_vault_config.sql`** (aplicada — corrige a estratégia de armazenamento do secret, ver seção abaixo). Só substitui o corpo de `notify_push_edge_function()` — as duas triggers, RLS, grants e `pg_net` da migration anterior continuam intocados.
 
 ### O problema de identidade que a trigger 5 precisa resolver
 
 `confirm_route_tx` (fluxo "entregador da loja") atribui `routes.driver_id` referenciando `public.drivers` — uma identidade **diferente** de `driver_profiles`, que é o que `driver_devices` usa. A ponte entre as duas já existe: `restaurant_driver_links (driver_profile_id, drivers_id, status)`. A trigger faz esse join (`status = 'active'`) antes de notificar — sem ele, notificação nenhuma chegaria para um entregador de loja, mesmo com tudo mais configurado.
 
-### O que NÃO foi setado (não inventado)
+### Correção de arquitetura: GUC → Supabase Vault
 
-`app.settings.push_notify_url`/`app.settings.push_notify_secret` — GUCs de nível de banco, configuráveis via `ALTER DATABASE postgres SET "app.settings.push_notify_url" = '...'`. **Nenhum valor real existe hoje.** Ver seção 8 para o passo manual exato.
+A primeira versão de `notify_push_edge_function()` lia a URL/secret via `current_setting('app.settings.push_notify_url'/'push_notify_secret', true)`, configurável (na teoria) via `ALTER DATABASE postgres SET ...`. **Isso falhou no Supabase hospedado**: `ERROR: 42501: permission denied to set parameter "app.settings.push_notify_url"` — definir um parâmetro de nível de banco é uma operação de dono do banco/role que o Supabase hospedado não expõe à role `postgres` que as migrations/conexões deste projeto usam. Não foi contornado com superuser nem `ALTER ROLE`.
+
+**Solução**: [Supabase Vault](https://supabase.com/docs/guides/database/vault) (`supabase_vault`, confirmado já habilitado neste projeto — schema `vault`, `vault.decrypted_secrets` com `SELECT` só para `postgres`/`service_role`, nenhum grant para `anon`/`authenticated`). `notify_push_edge_function()` agora lê `push_notify_secret` de `vault.decrypted_secrets` em vez de uma GUC. A URL **não é secreta** (mesmo project ref já visível em `supabase/config.toml` e em toda URL do painel) — mantida como literal versionado direto no corpo da função, em vez de uma segunda entrada no Vault (evita um segundo lookup sem ganho de segurança).
+
+**O valor do secret nunca foi inserido por nenhuma migration** — isso teria que aparecer em texto no arquivo, indo pro Git. Em vez disso, o `INSERT` (via `select vault.create_secret(...)`) foi feito manualmente, uma única vez, direto no SQL Editor do Supabase.
 
 ---
 
-## 5. Edge Function `send-push-notification` (novo, não implantado)
+## 5. Edge Function `send-push-notification` (implantada)
 
-`D:\RotazRO\RotazRO\supabase\functions\send-push-notification\index.ts` — **arquivo local, nunca rodou `supabase functions deploy`**.
+`D:\RotazRO\RotazRO\supabase\functions\send-push-notification\index.ts` — implantada com `supabase functions deploy send-push-notification --no-verify-jwt` (o `--no-verify-jwt` é necessário: o chamador é `pg_net` com um secret compartilhado próprio, não uma sessão de usuário do Supabase Auth — sem essa flag, o gateway da própria plataforma rejeitaria a chamada antes mesmo do código da função rodar).
 
 - **Única credencial Firebase de todo o sistema**: lê `FIREBASE_SERVICE_ACCOUNT_JSON` (secret da Edge Function, nunca commitado, nunca vai para o APK).
-- Verifica um `Authorization: Bearer <PUSH_NOTIFY_SECRET>` próprio (mesmo valor do GUC do banco) antes de fazer qualquer coisa — defesa extra além da verificação de JWT padrão do Supabase, para que a URL da função sozinha não seja suficiente para disparar um envio.
+- Verifica um `Authorization: Bearer <PUSH_NOTIFY_SECRET>` próprio (mesmo valor do secret no Vault) antes de fazer qualquer coisa — defesa extra além da verificação de JWT padrão do Supabase.
 - Busca tokens ativos em `driver_devices` (client `service_role`, nunca o do chamador).
 - Monta o conteúdo da notificação **inteiramente no servidor**, a partir só do `type` — nunca repassa nada do payload de entrada pro corpo da notificação (o payload da trigger já só tem ids, nunca dado de cliente).
 - Usa `firebase-admin` (via `npm:` no Deno) para chamar a API HTTP v1 do FCM.
 - Em erro de token inválido (`messaging/registration-token-not-registered`/`messaging/invalid-registration-token`): marca `revoked_at` — nunca deixa um token morto sendo tentado pra sempre.
-- **Nunca loga o token completo** — só uma "fingerprint" (6 primeiros caracteres + tamanho), suficiente pra correlacionar logs sem ser reproduzível.
+- **Nunca loga o token completo** — só uma "fingerprint" (6 primeiros caracteres + tamanho). Mensagens de erro do Firebase são sanitizadas (`sanitizeErrorMessage()`, remove qualquer bloco PEM, trunca) antes de qualquer log.
+- Testada ao vivo (sem token/device real): sem `Authorization` → 401; secret errado → 401; secret correto → autentica e chega até a query em `driver_devices` (confirmado nos logs reais da função, sem PII/token/secret neles).
 
 ---
 
-## 6. Testado localmente (embedded-postgres, 20 asserções)
+## 6. Testado localmente (embedded-postgres)
 
-A migration foi testada de ponta a ponta contra um Postgres 18 real e isolado:
-- `service_role` tem exatamente `SELECT, UPDATE` em `driver_devices` (nunca `INSERT`/`DELETE`).
-- Sem `app.settings.push_notify_url`/`push_notify_secret` configurados: nenhuma chamada é feita (payload count = 0).
-- Com as configurações setadas: a trigger de `delivery_offers` dispara com o payload correto (`type`, `offer_id`, `route_id`, `driver_profile_id`) só para `status='pending'` — nunca para `'accepted'`/outros.
-- A trigger de `routes` dispara `route_assigned` para atribuição direta (`confirm_route_tx`-shape), resolve o `driver_profile_id` corretamente via `restaurant_driver_links`, e **não duplica** o push quando a rota é confirmada através de uma oferta regional já aceita.
-- Rollback confirmado data-safe: remove as duas triggers e as três funções, revoga o grant — `driver_devices` (tabela/RLS/grants pré-existentes) intocado.
+**Migration original** (`...push_notifications.sql`) — 20 asserções contra um Postgres 18 real e isolado: grants exatos em `driver_devices`, condições das duas triggers, resolução da ponte de identidade via `restaurant_driver_links`, não-duplicação de push regional, rollback data-safe.
 
-**Limitação conhecida**: `pg_net` em si (a extensão real) **não está disponível num Postgres vanilla local** (é específica da plataforma Supabase) — a lógica das triggers foi validada contra um stub de `net.http_post` que captura a chamada, não contra a extensão de verdade. Isso é a mesma categoria de limitação já aceita para `pg_cron` em rodadas anteriores: comportamento de infraestrutura específica do Supabase só é validável de fato depois de aplicado no projeto real.
+**Migration corretiva do Vault** (`...vault_config.sql`) — 11 asserções adicionais, usando um stub de `vault.decrypted_secrets` (mesma interface de leitura da extensão real — `name`/`decrypted_secret` — mas sem a criptografia via pgsodium, que é infraestrutura exclusiva da plataforma Supabase): no-op silencioso sem o secret no Vault, no-op também com secret vazio, chamada correta com URL/header/payload quando presente, grants de `EXECUTE` corretos (`anon`/`authenticated` sem acesso, `service_role` com acesso), rollback restaura a versão GUC anterior.
+
+**Limitação conhecida (as duas rodadas)**: `pg_net` e `supabase_vault` — as extensões reais — **não estão disponíveis num Postgres vanilla local** (específicas da plataforma Supabase). A lógica de ambas foi validada contra stubs com a mesma interface de leitura/escrita; o comportamento real da infraestrutura (criptografia do Vault, entrega HTTP do pg_net) só é verificável depois de aplicado no projeto remoto — confirmado por leitura de metadata (`pg_extension`, grants, definição da função) após cada apply, não por execução local.
 
 ---
 
@@ -240,18 +246,17 @@ Migration: 20 asserções via embedded-postgres (seção 6).
 
 ---
 
-## 13. O que ainda falta para ativar de verdade
+## 13. Status — o que já foi feito vs. o que ainda falta
 
-1. Criar/reaproveitar um projeto Firebase para `com.rotazro.entregador`.
-2. Gerar `google-services.json` e colocar em `android/app/` (seção 2).
-3. Trocar `PUSH_NOTIFICATIONS_ENABLED` para `true`.
-4. Implantar a Edge Function (`supabase functions deploy send-push-notification`) e configurar seus secrets (`FIREBASE_SERVICE_ACCOUNT_JSON`, `PUSH_NOTIFY_SECRET`, `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` — os dois últimos geralmente já vêm automáticos no ambiente de Edge Functions do próprio projeto).
-5. Aplicar a migration `20260920000000_push_notifications.sql` no banco remoto (`supabase db push`, revisar antes como sempre).
-6. Configurar os dois GUCs no banco remoto:
-   ```sql
-   ALTER DATABASE postgres SET "app.settings.push_notify_url" = 'https://<project-ref>.supabase.co/functions/v1/send-push-notification';
-   ALTER DATABASE postgres SET "app.settings.push_notify_secret" = '<mesmo valor do secret PUSH_NOTIFY_SECRET da Edge Function>';
-   ```
-7. Testar em dispositivo real (não emulador — push FCM real precisa de Google Play Services).
+**Já feito** (rodadas de 2026-09-20):
+1. ✅ Projeto Firebase criado para `com.rotazro.entregador`, `google-services.json` colocado em `android/app/`.
+2. ✅ `PUSH_NOTIFICATIONS_ENABLED = true`.
+3. ✅ Edge Function implantada (`supabase functions deploy send-push-notification --no-verify-jwt`).
+4. ✅ `FIREBASE_SERVICE_ACCOUNT_JSON`/`PUSH_NOTIFY_SECRET` configurados como secrets da Edge Function.
+5. ✅ Ambas as migrations aplicadas no banco remoto (`20260920000000_push_notifications.sql` e a correção `20260920010000_push_notification_vault_config.sql`).
+6. ✅ `PUSH_NOTIFY_SECRET` inserido no Supabase Vault manualmente via SQL Editor (`select vault.create_secret(...)`), com o mesmo valor do secret da Edge Function.
 
-**Nada disto foi feito nesta rodada** — só código local, testado, documentado.
+**Falta**:
+1. Testar em dispositivo real (não emulador — push FCM real precisa de Google Play Services) — checklist completo na seção 12.
+
+Depois de validar em device, o próximo passo natural é abrir PR/merge dos commits desta rodada (não feito automaticamente — ver relatório da sessão).
