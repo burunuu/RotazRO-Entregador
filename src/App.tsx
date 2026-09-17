@@ -427,14 +427,28 @@ function App() {
   useEffect(() => {
     if (!authenticated || !driver) return
     void registerForPush(driver.id)
-    return onNotificationOpened(() => {
-      // O payload do push só serve de gatilho — o estado real (se a oferta
-      // ainda está pendente) é sempre buscado de novo do banco, nunca
-      // confiado diretamente. Isso apenas adianta o próximo tick do
-      // polling de 5s: se a oferta já foi expirada/cancelada/aceita por
-      // outro entregador, o refetch simplesmente não encontra nada e o
-      // modal não aparece.
-      deliveryOffers.refetch()
+    return onNotificationOpened((payload) => {
+      // O payload do push só serve de gatilho — o estado real é sempre
+      // buscado de novo do banco, nunca confiado diretamente. Isso apenas
+      // adianta o próximo tick do polling (5s para ofertas, 7s para rota
+      // atribuída): se já foi expirada/cancelada/aceita por outro
+      // entregador, o refetch simplesmente não encontra nada e nenhum
+      // modal aparece — Realtime, se já tiver mostrado o modal primeiro,
+      // não é duplicado porque os dois caminhos escrevem no mesmo estado
+      // único (`offer`/`route`), não numa lista.
+      if (payload.type === 'offer_created') {
+        void deliveryOffers.refetch().then((found) => {
+          if (payload.source === 'opened' && !found) {
+            logger.info('push.offer_stale_on_open', { offer_id: payload.offerId })
+          }
+        })
+      } else if (payload.type === 'route_assigned') {
+        void assignedRoute.refetch().then((found) => {
+          if (payload.source === 'opened' && !found) {
+            logger.info('push.offer_stale_on_open', { route_id: payload.routeId })
+          }
+        })
+      }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, driver?.id])

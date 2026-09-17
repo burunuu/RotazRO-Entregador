@@ -28,7 +28,7 @@ export function useDeliveryOffers(enabled: boolean) {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
   // Permite a um evento externo (push tocado/recebido) forçar uma busca
   // imediata em vez de esperar o próximo tick do polling de 5s.
-  const pollNow = useRef<() => void>(() => {})
+  const pollNow = useRef<() => Promise<boolean>>(() => Promise.resolve(false))
   const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -38,24 +38,26 @@ export function useDeliveryOffers(enabled: boolean) {
         timer.current = null
       }
       setOffer(null)
-      pollNow.current = () => {}
+      pollNow.current = () => Promise.resolve(false)
       return
     }
 
     let cancelled = false
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
-    async function poll() {
+    async function poll(): Promise<boolean> {
       try {
         const next = await fetchPendingOffer()
         if (!cancelled) {
           setOffer(next)
           setError(null)
         }
+        return next !== null
       } catch (err) {
         if (!cancelled) {
           captureError(err, { event: 'dispatch.fetch_offer_failed' })
         }
+        return false
       }
     }
 
@@ -67,7 +69,7 @@ export function useDeliveryOffers(enabled: boolean) {
       }, REALTIME_DEBOUNCE_MS)
     }
 
-    pollNow.current = () => void poll()
+    pollNow.current = () => poll()
     void poll()
     timer.current = setInterval(() => void poll(), POLL_MS)
 
@@ -84,7 +86,7 @@ export function useDeliveryOffers(enabled: boolean) {
 
     return () => {
       cancelled = true
-      pollNow.current = () => {}
+      pollNow.current = () => Promise.resolve(false)
       if (timer.current) clearInterval(timer.current)
       timer.current = null
       if (debounceTimer) clearTimeout(debounceTimer)
@@ -118,9 +120,12 @@ export function useDeliveryOffers(enabled: boolean) {
     }
   }, [offer])
 
-  /** Busca o estado real agora — nunca confia no payload do push, sempre refaz do banco. */
-  function refetch() {
-    pollNow.current()
+  /** Busca o estado real agora — nunca confia no payload do push, sempre
+   * refaz do banco. Resolve `true` se encontrou uma oferta pendente,
+   * `false` caso contrário — usado por quem chama para saber se um push
+   * tocado abriu de fato algo (ver `push.offer_stale_on_open`). */
+  function refetch(): Promise<boolean> {
+    return pollNow.current()
   }
 
   async function accept(): Promise<string | null> {

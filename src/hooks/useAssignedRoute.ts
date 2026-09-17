@@ -26,6 +26,10 @@ export function useAssignedRoute(enabled: boolean) {
   const [justAssignedRouteId, setJustAssignedRouteId] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
   const seenRouteIds = useRef<Set<string>>(new Set())
+  // Permite a um evento externo (push de "rota atribuída" tocado/recebido)
+  // forçar uma busca imediata em vez de esperar o próximo tick do polling
+  // de 7s — mesmo padrão já usado em useDeliveryOffers.ts.
+  const pollNow = useRef<() => Promise<boolean>>(() => Promise.resolve(false))
 
   useEffect(() => {
     if (!enabled) {
@@ -34,15 +38,16 @@ export function useAssignedRoute(enabled: boolean) {
         timer.current = null
       }
       setRoute(null)
+      pollNow.current = () => Promise.resolve(false)
       return
     }
 
     let cancelled = false
 
-    async function poll() {
+    async function poll(): Promise<boolean> {
       try {
         const next = await fetchMyActiveRoute()
-        if (cancelled) return
+        if (cancelled) return false
         setRoute(next)
 
         const active = next && (next.status === 'confirmed' || next.status === 'in_progress')
@@ -50,16 +55,20 @@ export function useAssignedRoute(enabled: boolean) {
           seenRouteIds.current.add(next.id)
           setJustAssignedRouteId(next.id)
         }
+        return active === true
       } catch (err) {
         if (!cancelled) captureError(err, { event: 'route.poll_assigned_route_failed' })
+        return false
       }
     }
 
+    pollNow.current = () => poll()
     void poll()
     timer.current = setInterval(() => void poll(), POLL_MS)
 
     return () => {
       cancelled = true
+      pollNow.current = () => Promise.resolve(false)
       if (timer.current) clearInterval(timer.current)
       timer.current = null
     }
@@ -69,12 +78,19 @@ export function useAssignedRoute(enabled: boolean) {
     setJustAssignedRouteId(null)
   }
 
+  /** Busca o estado real agora — nunca confia no payload do push, sempre
+   * refaz do banco. Resolve `true` se há rota confirmada/em andamento. */
+  function refetch(): Promise<boolean> {
+    return pollNow.current()
+  }
+
   const showPopup = justAssignedRouteId !== null && route?.id === justAssignedRouteId
 
   return {
     route,
     showPopup,
     dismissPopup,
+    refetch,
     nextStop: route ? nextPendingStop(route) : null,
   }
 }

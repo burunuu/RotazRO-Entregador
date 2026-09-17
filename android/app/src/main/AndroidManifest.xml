@@ -5,6 +5,12 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!-- Push notifications (FCM) — obrigatória a partir do Android 13
+         (API 33) para o diálogo de permissão em runtime funcionar; sem
+         esta declaração, PushNotifications.requestPermissions() falha
+         silenciosamente em API 33+. targetSdkVersion deste projeto é 36. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -27,6 +33,17 @@
             </intent-filter>
 
         </activity>
+
+        <!-- FCM: ícone padrão para notificações em background (a mensageria
+             nativa do Android monta a notificação sem passar pelo código
+             JS quando o app não está em foreground). Usa o ícone do app
+             existente — trocar por um ícone monocromático dedicado
+             (recomendação de design do Android) é uma melhoria futura, não
+             um bloqueio: sem isso, o FCM já usa o ícone do app como
+             fallback de qualquer forma. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
