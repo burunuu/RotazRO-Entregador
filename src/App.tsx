@@ -14,8 +14,11 @@ import { AssignedRouteModal } from './components/AssignedRouteModal'
 import { AssignedRouteCard } from './components/AssignedRouteCard'
 import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
+import { SignUpScreen } from './screens/SignUpScreen'
+import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
+import { resolvePendingSignup } from './lib/pending-signup'
 import { fetchMyActiveRoute } from './services/routes'
-import { formatDuration, routeStatusLabel } from './lib/format'
+import { formatDuration, formatBrazilPhone, routeStatusLabel } from './lib/format'
 import { captureError } from './lib/observability/capture'
 import { logger } from './lib/observability/logger'
 import './App.css'
@@ -36,7 +39,7 @@ const VEHICLE_TYPES = [
   { value: 'van', label: 'Van' },
 ]
 
-type AppView = 'home' | 'profile' | 'history' | 'route'
+type AppView = 'home' | 'profile' | 'history' | 'route' | 'restaurants'
 
 type Driver = {
   id: string
@@ -116,55 +119,6 @@ const EMPTY_METRICS: HistoryMetrics = {
   durationSeconds: 0,
   amountCents: 0,
   restaurants: 0,
-}
-
-// =========================================================
-// TELEFONE
-// =========================================================
-
-function onlyDigits(value: string) {
-  return value.replace(/\D/g, '').slice(0, 11)
-}
-
-function formatBrazilPhone(value: string) {
-  const digits = onlyDigits(value)
-
-  if (!digits) return ''
-
-  if (digits.length <= 2) {
-    return `(${digits}`
-  }
-
-  const ddd = digits.slice(0, 2)
-  const number = digits.slice(2)
-
-  if (digits.length <= 6) {
-    return `(${ddd}) ${number}`
-  }
-
-  /*
-   * Telefone fixo / formato de 10 dígitos:
-   * (69) 3870-8886
-   */
-  if (digits.length <= 10) {
-    const first = number.slice(0, 4)
-    const second = number.slice(4)
-
-    return second
-      ? `(${ddd}) ${first}-${second}`
-      : `(${ddd}) ${first}`
-  }
-
-  /*
-   * Celular / formato de 11 dígitos:
-   * (69) 93870-8886
-   */
-  const first = number.slice(0, 5)
-  const second = number.slice(5)
-
-  return second
-    ? `(${ddd}) ${first}-${second}`
-    : `(${ddd}) ${first}`
 }
 
 // =========================================================
@@ -312,6 +266,7 @@ function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [loadingSession, setLoadingSession] = useState(true)
   const [loginLoading, setLoginLoading] = useState(false)
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
 
   const [driver, setDriver] = useState<Driver | null>(null)
   // driver_profiles.id — DISTINCT from driver?.id, which is drivers.id (the
@@ -1054,6 +1009,10 @@ function App() {
         }
 
         if (session) {
+          if (session.user.email) {
+            await resolvePendingSignup(session.user.email)
+          }
+
           const loadedDriver =
             await loadDriver()
 
@@ -1115,6 +1074,8 @@ function App() {
       if (error) {
         throw error
       }
+
+      await resolvePendingSignup(email.trim())
 
       const loadedDriver =
         await loadDriver()
@@ -1800,6 +1761,22 @@ function App() {
     )
   }
 
+  if (!authenticated && authMode === 'signup') {
+    return (
+      <SignUpScreen
+        onSignedUp={() => {
+          setAuthMode('login')
+          void (async () => {
+            const loadedDriver = await loadDriver()
+            setAuthenticated(true)
+            void loadHistory(loadedDriver.id)
+          })()
+        }}
+        onCancel={() => setAuthMode('login')}
+      />
+    )
+  }
+
   if (!authenticated || !driver) {
     return (
       <main className="app">
@@ -1863,6 +1840,14 @@ function App() {
                 : 'Entrar'}
             </button>
           </form>
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setAuthMode('signup')}
+          >
+            Criar conta
+          </button>
         </section>
       </main>
     )
@@ -1958,6 +1943,21 @@ function App() {
           >
             <span>◷</span>
             Histórico
+          </button>
+
+          <button
+            type="button"
+            className={
+              view === 'restaurants'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              navigate('restaurants')
+            }
+          >
+            <span>🏬</span>
+            Meus restaurantes
           </button>
 
           <button
@@ -3010,6 +3010,13 @@ function App() {
             historyView}
 
           {view === 'route' && <MyRouteScreen onFinished={() => navigate('home')} />}
+
+          {view === 'restaurants' &&
+            (driverProfileId ? (
+              <MyRestaurantsScreen driverProfileId={driverProfileId} />
+            ) : (
+              <p className="description">Carregando...</p>
+            ))}
         </div>
       </section>
 
