@@ -1916,13 +1916,16 @@ function App() {
             </button>
           </form>
 
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => setAuthMode('signup')}
-          >
-            Criar conta
-          </button>
+          <p className="login-signup-prompt">
+            Ainda não tem uma conta?{' '}
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setAuthMode('signup')}
+            >
+              Criar conta
+            </button>
+          </p>
         </section>
       </main>
     )

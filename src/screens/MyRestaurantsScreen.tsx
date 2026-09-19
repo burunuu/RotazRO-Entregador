@@ -64,7 +64,7 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
   const activeRestaurants = (restaurants ?? []).filter((r) => r.status === 'active')
 
   return (
-    <>
+    <div className="my-restaurants-screen">
       <section className="page-title">
         <p className="eyebrow">SEUS VÍNCULOS</p>
         <h1>Meus restaurantes</h1>
@@ -92,6 +92,6 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
           ))}
         </ul>
       )}
-    </>
+    </div>
   )
 }

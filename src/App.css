@@ -817,10 +817,27 @@ h2 {
   display: grid;
   gap: 12px;
   margin-top: 16px;
+  padding: 0;
+  list-style: none;
+  justify-items: center;
 }
 
 .restaurant-list-item {
+  width: 100%;
   padding: 16px 18px;
+  text-align: center;
+}
+
+.my-restaurants-screen {
+  text-align: center;
+}
+
+.my-restaurants-screen .card {
+  margin-inline: auto;
+}
+
+.my-restaurants-screen .page-title p:last-child {
+  margin-inline: auto;
 }
 
 .profile-status-icon {
@@ -1189,6 +1206,36 @@ button.secondary:hover:not(:disabled) {
 
 .work-button {
   background: var(--text);
+}
+
+.login-signup-prompt {
+  margin: 28px 0 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+button.link-button {
+  display: inline-block;
+  width: auto;
+  min-height: 0;
+  padding: 6px 2px;
+  margin: -6px 0 0 2px;
+  border: none;
+  background: none;
+  color: var(--accent-dark);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.link-button:hover:not(:disabled) {
+  background: none;
+  color: var(--accent);
+}
+
+button.link-button:active:not(:disabled) {
+  transform: none;
 }
 
 /* =========================================================
