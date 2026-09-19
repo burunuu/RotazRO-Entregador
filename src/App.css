@@ -813,6 +813,16 @@ h2 {
   line-height: 1.5;
 }
 
+.restaurant-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.restaurant-list-item {
+  padding: 16px 18px;
+}
+
 .profile-status-icon {
   flex: 0 0 auto;
   width: 11px;

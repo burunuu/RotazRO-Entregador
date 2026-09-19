@@ -1,8 +1,10 @@
 /**
  * Shared `beforeSend`/`beforeBreadcrumb` sanitization for Sentry — same
- * contract as the Web repo's copy, plus one APK-specific rule: precise GPS
+ * contract as the Web repo's copy, plus two APK-specific rules: precise GPS
  * coordinates are never forwarded, even inside an error's own extra data
- * (see docs/ROTazRO_OBSERVABILITY.md, "GPS").
+ * (see docs/ROTazRO_OBSERVABILITY.md, "GPS"), and neither is any App
+ * Link/deep link URL this app now handles (route share tokens in the path,
+ * auth confirmation tokens in the query string or URL fragment).
  */
 
 const SECRET_KEY_PATTERN =
@@ -27,9 +29,27 @@ const REDACTED = "[redacted]";
  * method/status stay visible via other breadcrumb fields) and drops
  * everything from the first "?" onward.
  */
-const URL_QUERY_STRING_PATTERN = /(https?:\/\/[^\s"'?]+)\?[^\s"']*/gi;
+const URL_QUERY_STRING_PATTERN = /(https?:\/\/[^\s"'?#]+)\?[^\s"'#]*/gi;
+
+/**
+ * The URL fragment is where Supabase's default (implicit-flow) e-mail
+ * confirmation redirect puts a LIVE access_token/refresh_token pair — the
+ * single most sensitive thing this app's deep links ever carry. Stripped
+ * the same way a query string is, and checked independently of it since a
+ * URL can have both (`?a=1#access_token=...`).
+ */
+const URL_FRAGMENT_PATTERN = /(https?:\/\/[^\s"'#]+)#[^\s"']*/gi;
+
+/** `/e/<token>` — the driver portal share-link path (see
+ * share-token.server.ts in the Web repo): a 40-char HMAC token embedded
+ * directly in the path, not the query string, so URL_QUERY_STRING_PATTERN
+ * alone would never catch it. Mirrors the Web repo's own
+ * SHARE_LINK_PATH_PATTERN. */
+const SHARE_LINK_PATH_PATTERN = /(\/e\/)[a-f0-9]{20,}/gi;
 
 function stripUrlQueries(value: string): string {
+  value = value.replace(SHARE_LINK_PATH_PATTERN, "$1[redacted]");
+  value = value.replace(URL_FRAGMENT_PATTERN, "$1#[redacted]");
   return value.replace(URL_QUERY_STRING_PATTERN, "$1?[redacted]");
 }
 
