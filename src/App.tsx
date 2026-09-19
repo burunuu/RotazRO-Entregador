@@ -15,8 +15,8 @@ import { AssignedRouteCard } from './components/AssignedRouteCard'
 import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
 import { SignUpScreen } from './screens/SignUpScreen'
+import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
-import { resolvePendingSignup } from './lib/pending-signup'
 import { fetchMyActiveRoute } from './services/routes'
 import { formatDuration, formatBrazilPhone, routeStatusLabel } from './lib/format'
 import { captureError } from './lib/observability/capture'
@@ -276,6 +276,11 @@ function App() {
   // driver_profiles, not drivers — passing driver.id there was the exact
   // root cause of every push registration 403'ing for "loja" drivers.
   const [driverProfileId, setDriverProfileId] = useState<string | null>(null)
+  // Só relevante para entregadores regionais recém-cadastrados: driver_profiles
+  // criado por ensure_driver_profile() nasce com full_name vazio; completeDriverSignup()
+  // é o único caminho que o preenche. Nunca se aplica a "entregador da loja"
+  // (drivers.name é obrigatório desde a criação pelo restaurante).
+  const [profileIncomplete, setProfileIncomplete] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
 
   // =========================================================
@@ -696,6 +701,8 @@ function App() {
         throw new Error('Este entregador está inativo.')
       }
 
+      setProfileIncomplete(!profile.full_name)
+
       const regionalDriver: Driver = {
         id: profile.id,
         name: profile.full_name || 'Entregador',
@@ -712,6 +719,8 @@ function App() {
 
       return regionalDriver
     }
+
+    setProfileIncomplete(false)
 
     const { data: driverData, error: driverError } =
       await supabase
@@ -1009,10 +1018,6 @@ function App() {
         }
 
         if (session) {
-          if (session.user.email) {
-            await resolvePendingSignup(session.user.email)
-          }
-
           const loadedDriver =
             await loadDriver()
 
@@ -1074,8 +1079,6 @@ function App() {
       if (error) {
         throw error
       }
-
-      await resolvePendingSignup(email.trim())
 
       const loadedDriver =
         await loadDriver()
@@ -1691,6 +1694,7 @@ function App() {
     setAuthenticated(false)
     setDriver(null)
     setDriverProfileId(null)
+    setProfileIncomplete(false)
     setLocation(null)
 
     setEmail('')
@@ -1850,6 +1854,19 @@ function App() {
           </button>
         </section>
       </main>
+    )
+  }
+
+  if (profileIncomplete) {
+    return (
+      <CompleteProfileScreen
+        onCompleted={() => {
+          void loadDriver()
+        }}
+        onLogout={() => {
+          void handleLogout()
+        }}
+      />
     )
   }
 

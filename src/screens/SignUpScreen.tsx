@@ -1,36 +1,25 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '../lib/supabase'
-import { completeDriverSignup } from '../services/driver-identity'
-import { savePendingSignup } from '../lib/pending-signup'
-import { formatBrazilPhone } from '../lib/format'
-import { isValidBrazilianPhone, isValidCpf, normalizeEmail } from '../lib/validation'
+import { normalizeEmail } from '../lib/validation'
 import { logger } from '../lib/observability/logger'
 
-function formatCpf(value: string): string {
-  const digits = value.replace(/\D/g, '').slice(0, 11)
-  const p1 = digits.slice(0, 3)
-  const p2 = digits.slice(3, 6)
-  const p3 = digits.slice(6, 9)
-  const p4 = digits.slice(9, 11)
-  let out = p1
-  if (p2) out += `.${p2}`
-  if (p3) out += `.${p3}`
-  if (p4) out += `-${p4}`
-  return out
-}
-
 type SignUpScreenProps = {
-  /** Cadastro concluído com sessão ativa — a tela pai deve carregar o entregador normalmente. */
+  /** Cadastro concluído com sessão ativa — a tela pai deve carregar o
+   * entregador normalmente (nome/CPF/telefone são coletados depois, no
+   * primeiro login, por CompleteProfileScreen — nunca aqui). */
   onSignedUp: () => void
   onCancel: () => void
 }
 
+/**
+ * Coleta só e-mail e senha. Nome/CPF/telefone NUNCA passam por esta tela —
+ * ver CompleteProfileScreen, que roda depois do primeiro login (com sessão
+ * garantida) e grava tudo direto via complete_driver_signup(), sem
+ * nenhuma etapa intermediária que precise reter esse dado localmente.
+ */
 export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
   const [email, setEmail] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [cpf, setCpf] = useState('')
-  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -41,18 +30,6 @@ export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
     event.preventDefault()
     setError(null)
 
-    if (!fullName.trim()) {
-      setError('Informe seu nome completo.')
-      return
-    }
-    if (!isValidCpf(cpf)) {
-      setError('CPF inválido.')
-      return
-    }
-    if (!isValidBrazilianPhone(phone)) {
-      setError('Telefone inválido. Use DDD + número.')
-      return
-    }
     if (password.length < 6) {
       setError('A senha precisa ter pelo menos 6 caracteres.')
       return
@@ -73,15 +50,13 @@ export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
       if (signUpError) throw signUpError
 
       if (data.session) {
-        await completeDriverSignup(fullName.trim(), cpf, phone)
         onSignedUp()
         return
       }
 
-      // Confirmação de e-mail ativada no projeto: ainda não há sessão para
-      // gravar nome/CPF/telefone agora — fica pendente até o primeiro
-      // login, resolvido por resolvePendingSignup() (ver App.tsx).
-      savePendingSignup({ email: normalizedEmail, fullName: fullName.trim(), cpf, phone })
+      // Confirmação de e-mail ativada no projeto: sem sessão ainda — não
+      // há nada de sensível a guardar nesse meio-tempo, só o convite para
+      // voltar e entrar depois de confirmar.
       setAwaitingConfirmation(true)
     } catch (err) {
       logger.warn('auth.signup_failed', {
@@ -116,22 +91,13 @@ export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
       <section className="card login-card">
         <p className="eyebrow">ROTAZRO ENTREGADOR</p>
         <h1>Criar conta</h1>
-        <p className="description">Cadastre-se para começar a receber entregas.</p>
+        <p className="description">
+          Cadastre seu e-mail e senha. No primeiro login pedimos seu nome, CPF e celular.
+        </p>
 
         {error && <div className="error">{error}</div>}
 
         <form onSubmit={handleSubmit}>
-          <label>
-            Nome completo
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              autoComplete="name"
-              required
-            />
-          </label>
-
           <label>
             E-mail
             <input
@@ -140,33 +106,6 @@ export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
               inputMode="email"
-              required
-            />
-          </label>
-
-          <label>
-            CPF
-            <input
-              type="text"
-              value={formatCpf(cpf)}
-              onChange={(e) => setCpf(e.target.value)}
-              placeholder="000.000.000-00"
-              inputMode="numeric"
-              maxLength={14}
-              required
-            />
-          </label>
-
-          <label>
-            Número de celular
-            <input
-              type="tel"
-              value={formatBrazilPhone(phone)}
-              onChange={(e) => setPhone(formatBrazilPhone(e.target.value))}
-              placeholder="(69) 99999-9999"
-              inputMode="numeric"
-              autoComplete="tel"
-              maxLength={15}
               required
             />
           </label>
