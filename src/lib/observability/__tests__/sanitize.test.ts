@@ -123,4 +123,36 @@ describe("sanitizeEvent", () => {
     const result = sanitizeEvent(event);
     expect(result).toEqual({ message: "hello", level: "info" });
   });
+
+  it("redacts a route share-link token embedded in the URL path (deep link handling)", () => {
+    const token = "a".repeat(40);
+    const event = {
+      request: { url: `https://rotazro.lovable.app/e/${token}` },
+      breadcrumbs: [{ category: "navigation", data: { to: `https://rotazro.lovable.app/e/${token}` } }],
+    };
+    const result = sanitizeEvent(event);
+    expect(result.request?.url).toBe("https://rotazro.lovable.app/e/[redacted]");
+    expect(result.breadcrumbs?.[0]?.data?.["to"]).toBe("https://rotazro.lovable.app/e/[redacted]");
+  });
+
+  it("redacts an auth confirmation access_token carried in the URL fragment", () => {
+    const event = {
+      request: {
+        url: "https://rotazro.lovable.app/auth/confirm#access_token=live-session-token&refresh_token=rt&type=signup",
+      },
+    };
+    const result = sanitizeEvent(event);
+    const url = result.request?.url as string;
+    expect(url).not.toContain("live-session-token");
+    expect(url).not.toContain("refresh_token=rt");
+    expect(url).toBe("https://rotazro.lovable.app/auth/confirm#[redacted]");
+  });
+
+  it("redacts a token_hash query param used by the custom auth-confirm redirect", () => {
+    const event = {
+      request: { url: "https://rotazro.lovable.app/auth/confirm?token_hash=abc123&type=signup" },
+    };
+    const result = sanitizeEvent(event);
+    expect(result.request?.url).toBe("https://rotazro.lovable.app/auth/confirm?[redacted]");
+  });
 });

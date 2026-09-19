@@ -201,3 +201,25 @@ export async function completeMyRoute(routeId: string): Promise<void> {
   const { error } = await supabase.rpc('complete_my_route', { _route_id: routeId })
   if (error) throw error
 }
+
+export type RouteShareLinkResolution = {
+  routeId: string
+  isMine: boolean
+}
+
+/**
+ * Resolves a tapped route share link (/e/<token>) — reuses
+ * route_share_links entirely server-side (same hash/expiry/revocation
+ * checks the Web portal itself uses), and reports whether the CALLING
+ * driver already owns that route. Authenticated only: call after login,
+ * never before — see resolve_route_share_token() in the Web repo's
+ * migrations for the full contract.
+ */
+export async function resolveRouteShareToken(token: string): Promise<RouteShareLinkResolution> {
+  const { data, error } = await supabase
+    .rpc('resolve_route_share_token', { _token: token })
+    .single()
+  if (error) throw error
+  const row = data as { route_id: string; is_mine: boolean }
+  return { routeId: row.route_id, isMine: row.is_mine }
+}

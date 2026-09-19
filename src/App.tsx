@@ -16,8 +16,10 @@ import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
 import { SignUpScreen } from './screens/SignUpScreen'
 import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
+import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
-import { fetchMyActiveRoute } from './services/routes'
+import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
+import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
 import { formatDuration, formatBrazilPhone, routeStatusLabel } from './lib/format'
 import { captureError } from './lib/observability/capture'
 import { logger } from './lib/observability/logger'
@@ -282,6 +284,53 @@ function App() {
   // (drivers.name é obrigatório desde a criação pelo restaurante).
   const [profileIncomplete, setProfileIncomplete] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+
+  // =========================================================
+  // DEEP LINKS (App Links — /e/<token> e /auth/confirm)
+  // =========================================================
+
+  // Não-nulo derruba TODAS as outras telas (login/app) até ser resolvido —
+  // confirmar e-mail precisa funcionar em qualquer estado da sessão atual.
+  const [authConfirmLink, setAuthConfirmLink] = useState<{ search: string; hash: string } | null>(
+    null,
+  )
+  // Token de link de rota tocado ANTES do login: só o token fica em memória
+  // (nunca persistido) até o login terminar, quando é resolvido pelo
+  // servidor (resolveRouteShareToken) — ver o efeito abaixo.
+  const [pendingRouteToken, setPendingRouteToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    return registerDeepLinkListener((payload: DeepLinkPayload) => {
+      if (payload.kind === 'auth_confirm') {
+        setAuthConfirmLink({ search: payload.search, hash: payload.hash })
+      } else {
+        setPendingRouteToken(payload.token)
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!authenticated || profileIncomplete || !pendingRouteToken) return
+    const token = pendingRouteToken
+    setPendingRouteToken(null)
+
+    void resolveRouteShareToken(token)
+      .then((resolution) => {
+        if (resolution.isMine) {
+          navigate('route')
+        } else {
+          // Mesmo acesso que esse link já dá hoje no navegador — só
+          // conhecer o link nunca basta para assumir uma rota de outro
+          // entregador dentro das telas autenticadas deste app.
+          window.open(`https://rotazro.lovable.app/e/${token}`, '_system')
+        }
+      })
+      .catch((error) => {
+        captureError(error, { event: 'deep_link.resolve_route_token_failed' })
+        setAuthError('Não foi possível abrir o link da rota. Ele pode ter expirado ou sido revogado.')
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, profileIncomplete, pendingRouteToken])
 
   // =========================================================
   // NAVEGAÇÃO
@@ -1750,6 +1799,28 @@ function App() {
   // =========================================================
   // LOADING / LOGIN
   // =========================================================
+
+  if (authConfirmLink) {
+    return (
+      <AuthConfirmScreen
+        search={authConfirmLink.search}
+        hash={authConfirmLink.hash}
+        onDone={() => {
+          setAuthConfirmLink(null)
+          void loadDriver()
+            .then((loadedDriver) => {
+              setAuthenticated(true)
+              void loadHistory(loadedDriver.id)
+            })
+            .catch(() => {
+              // Sem sessão de verdade (ex.: link já expirado e a pessoa só
+              // quer voltar) — cai no formulário de login normalmente.
+              setAuthenticated(false)
+            })
+        }}
+      />
+    )
+  }
 
   if (loadingSession) {
     return (

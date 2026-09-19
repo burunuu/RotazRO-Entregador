@@ -32,6 +32,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Android App Links (https://developer.android.com/training/app-links) —
+                 route share links (/e/<token>) and the e-mail confirmation deep link
+                 (/auth/confirm). android:autoVerify="true" makes Android check
+                 assetlinks.json (see docs/ROTAZRO_APP_LINKS.md in the Web repo) and,
+                 if it matches, open these links straight in this app instead of the
+                 browser — falls back to the normal chooser/browser otherwise, exactly
+                 like any unverified https link. Does not touch the MAIN/LAUNCHER
+                 filter above. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="rotazro.lovable.app"
+                    android:pathPrefix="/e/" />
+                <data
+                    android:scheme="https"
+                    android:host="rotazro.lovable.app"
+                    android:pathPrefix="/auth/confirm" />
+            </intent-filter>
+
         </activity>
 
         <!-- FCM: ícone padrão para notificações em background (a mensageria
