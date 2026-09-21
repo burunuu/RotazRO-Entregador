@@ -18,6 +18,7 @@ import { SignUpScreen } from './screens/SignUpScreen'
 import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
 import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
+import { ThemeSelector } from './components/ThemeSelector'
 import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
 import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
 import { formatDuration, formatBrazilPhone, routeStatusLabel } from './lib/format'
@@ -2656,6 +2657,8 @@ function App() {
           </p>
         </div>
       </section>
+
+      <ThemeSelector />
     </>
   )
 
