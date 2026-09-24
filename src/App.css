@@ -32,6 +32,38 @@
   font-synthesis: none;
 }
 
+/* Aplicada em <html> por useAppTheme (src/lib/theme.ts) — nunca preto
+   puro: grafite escuro + cards um tom mais claros + laranja RotazRO
+   preservado, mesma paleta do modo escuro do painel Web. */
+.dark {
+  --bg: #1a1c22;
+  --surface: #262930;
+  --surface-soft: #2e323a;
+  --surface-strong: #363b44;
+
+  --text: #f0ece2;
+  --text-muted: #a8a39a;
+  --text-soft: #7d7970;
+
+  --border: rgba(255, 255, 255, 0.13);
+
+  --accent: #d9a355;
+  --accent-dark: #c9862b;
+  --accent-soft: rgba(217, 163, 85, 0.16);
+
+  --success: #4db47e;
+  --success-soft: rgba(77, 180, 126, 0.14);
+
+  --danger: #d16565;
+  --danger-bg: rgba(209, 101, 101, 0.14);
+
+  --warning: #e0b355;
+  --warning-bg: rgba(224, 179, 85, 0.14);
+  --warning-strong: #f0d9a0;
+
+  color-scheme: dark;
+}
+
 #root {
   min-height: 100vh;
 }
@@ -806,11 +838,76 @@ h2 {
   font-size: 14px;
 }
 
+.theme-selector {
+  margin-top: 16px;
+}
+
+.theme-selector .eyebrow {
+  margin-bottom: 8px;
+}
+
+.theme-selector-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.theme-selector-option {
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.theme-selector-option.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
 .profile-status-card p {
   margin: 0;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.restaurant-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 0;
+  padding-inline-start: 0;
+  list-style: none;
+  list-style-type: none;
+  justify-items: center;
+}
+
+.restaurant-list-item {
+  width: 100%;
+  padding: 16px 18px;
+  text-align: center;
+  list-style: none;
+  list-style-type: none;
+}
+
+.restaurant-list-item::marker {
+  content: none;
+}
+
+.my-restaurants-screen {
+  text-align: center;
+}
+
+.my-restaurants-screen .card {
+  margin-inline: auto;
+}
+
+.my-restaurants-screen .page-title p:last-child {
+  margin-inline: auto;
 }
 
 .profile-status-icon {
@@ -1179,6 +1276,36 @@ button.secondary:hover:not(:disabled) {
 
 .work-button {
   background: var(--text);
+}
+
+.login-signup-prompt {
+  margin: 28px 0 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+button.link-button {
+  display: inline-block;
+  width: auto;
+  min-height: 0;
+  padding: 6px 2px;
+  margin: -6px 0 0 2px;
+  border: none;
+  background: none;
+  color: var(--accent-dark);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.link-button:hover:not(:disabled) {
+  background: none;
+  color: var(--accent);
+}
+
+button.link-button:active:not(:disabled) {
+  transform: none;
 }
 
 /* =========================================================

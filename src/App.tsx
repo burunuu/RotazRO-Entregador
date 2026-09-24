@@ -14,8 +14,14 @@ import { AssignedRouteModal } from './components/AssignedRouteModal'
 import { AssignedRouteCard } from './components/AssignedRouteCard'
 import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
-import { fetchMyActiveRoute } from './services/routes'
-import { formatDuration, routeStatusLabel } from './lib/format'
+import { SignUpScreen } from './screens/SignUpScreen'
+import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
+import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
+import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
+import { ThemeSelector } from './components/ThemeSelector'
+import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
+import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
+import { formatDuration, formatBrazilPhone, routeStatusLabel } from './lib/format'
 import { captureError } from './lib/observability/capture'
 import { logger } from './lib/observability/logger'
 import './App.css'
@@ -36,7 +42,7 @@ const VEHICLE_TYPES = [
   { value: 'van', label: 'Van' },
 ]
 
-type AppView = 'home' | 'profile' | 'history' | 'route'
+type AppView = 'home' | 'profile' | 'history' | 'route' | 'restaurants'
 
 type Driver = {
   id: string
@@ -116,55 +122,6 @@ const EMPTY_METRICS: HistoryMetrics = {
   durationSeconds: 0,
   amountCents: 0,
   restaurants: 0,
-}
-
-// =========================================================
-// TELEFONE
-// =========================================================
-
-function onlyDigits(value: string) {
-  return value.replace(/\D/g, '').slice(0, 11)
-}
-
-function formatBrazilPhone(value: string) {
-  const digits = onlyDigits(value)
-
-  if (!digits) return ''
-
-  if (digits.length <= 2) {
-    return `(${digits}`
-  }
-
-  const ddd = digits.slice(0, 2)
-  const number = digits.slice(2)
-
-  if (digits.length <= 6) {
-    return `(${ddd}) ${number}`
-  }
-
-  /*
-   * Telefone fixo / formato de 10 dígitos:
-   * (69) 3870-8886
-   */
-  if (digits.length <= 10) {
-    const first = number.slice(0, 4)
-    const second = number.slice(4)
-
-    return second
-      ? `(${ddd}) ${first}-${second}`
-      : `(${ddd}) ${first}`
-  }
-
-  /*
-   * Celular / formato de 11 dígitos:
-   * (69) 93870-8886
-   */
-  const first = number.slice(0, 5)
-  const second = number.slice(5)
-
-  return second
-    ? `(${ddd}) ${first}-${second}`
-    : `(${ddd}) ${first}`
 }
 
 // =========================================================
@@ -312,6 +269,7 @@ function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [loadingSession, setLoadingSession] = useState(true)
   const [loginLoading, setLoginLoading] = useState(false)
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
 
   const [driver, setDriver] = useState<Driver | null>(null)
   // driver_profiles.id — DISTINCT from driver?.id, which is drivers.id (the
@@ -321,7 +279,59 @@ function App() {
   // driver_profiles, not drivers — passing driver.id there was the exact
   // root cause of every push registration 403'ing for "loja" drivers.
   const [driverProfileId, setDriverProfileId] = useState<string | null>(null)
+  // Só relevante para entregadores regionais recém-cadastrados: driver_profiles
+  // criado por ensure_driver_profile() nasce com full_name vazio; completeDriverSignup()
+  // é o único caminho que o preenche. Nunca se aplica a "entregador da loja"
+  // (drivers.name é obrigatório desde a criação pelo restaurante).
+  const [profileIncomplete, setProfileIncomplete] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+
+  // =========================================================
+  // DEEP LINKS (App Links — /e/<token> e /auth/confirm)
+  // =========================================================
+
+  // Não-nulo derruba TODAS as outras telas (login/app) até ser resolvido —
+  // confirmar e-mail precisa funcionar em qualquer estado da sessão atual.
+  const [authConfirmLink, setAuthConfirmLink] = useState<{ search: string; hash: string } | null>(
+    null,
+  )
+  // Token de link de rota tocado ANTES do login: só o token fica em memória
+  // (nunca persistido) até o login terminar, quando é resolvido pelo
+  // servidor (resolveRouteShareToken) — ver o efeito abaixo.
+  const [pendingRouteToken, setPendingRouteToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    return registerDeepLinkListener((payload: DeepLinkPayload) => {
+      if (payload.kind === 'auth_confirm') {
+        setAuthConfirmLink({ search: payload.search, hash: payload.hash })
+      } else {
+        setPendingRouteToken(payload.token)
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!authenticated || profileIncomplete || !pendingRouteToken) return
+    const token = pendingRouteToken
+    setPendingRouteToken(null)
+
+    void resolveRouteShareToken(token)
+      .then((resolution) => {
+        if (resolution.isMine) {
+          navigate('route')
+        } else {
+          // Mesmo acesso que esse link já dá hoje no navegador — só
+          // conhecer o link nunca basta para assumir uma rota de outro
+          // entregador dentro das telas autenticadas deste app.
+          window.open(`https://rotazro.lovable.app/e/${token}`, '_system')
+        }
+      })
+      .catch((error) => {
+        captureError(error, { event: 'deep_link.resolve_route_token_failed' })
+        setAuthError('Não foi possível abrir o link da rota. Ele pode ter expirado ou sido revogado.')
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, profileIncomplete, pendingRouteToken])
 
   // =========================================================
   // NAVEGAÇÃO
@@ -741,6 +751,8 @@ function App() {
         throw new Error('Este entregador está inativo.')
       }
 
+      setProfileIncomplete(!profile.full_name)
+
       const regionalDriver: Driver = {
         id: profile.id,
         name: profile.full_name || 'Entregador',
@@ -757,6 +769,8 @@ function App() {
 
       return regionalDriver
     }
+
+    setProfileIncomplete(false)
 
     const { data: driverData, error: driverError } =
       await supabase
@@ -1730,6 +1744,7 @@ function App() {
     setAuthenticated(false)
     setDriver(null)
     setDriverProfileId(null)
+    setProfileIncomplete(false)
     setLocation(null)
 
     setEmail('')
@@ -1786,6 +1801,28 @@ function App() {
   // LOADING / LOGIN
   // =========================================================
 
+  if (authConfirmLink) {
+    return (
+      <AuthConfirmScreen
+        search={authConfirmLink.search}
+        hash={authConfirmLink.hash}
+        onDone={() => {
+          setAuthConfirmLink(null)
+          void loadDriver()
+            .then((loadedDriver) => {
+              setAuthenticated(true)
+              void loadHistory(loadedDriver.id)
+            })
+            .catch(() => {
+              // Sem sessão de verdade (ex.: link já expirado e a pessoa só
+              // quer voltar) — cai no formulário de login normalmente.
+              setAuthenticated(false)
+            })
+        }}
+      />
+    )
+  }
+
   if (loadingSession) {
     return (
       <main className="app">
@@ -1797,6 +1834,22 @@ function App() {
           <h1>Carregando...</h1>
         </section>
       </main>
+    )
+  }
+
+  if (!authenticated && authMode === 'signup') {
+    return (
+      <SignUpScreen
+        onSignedUp={() => {
+          setAuthMode('login')
+          void (async () => {
+            const loadedDriver = await loadDriver()
+            setAuthenticated(true)
+            void loadHistory(loadedDriver.id)
+          })()
+        }}
+        onCancel={() => setAuthMode('login')}
+      />
     )
   }
 
@@ -1863,8 +1916,32 @@ function App() {
                 : 'Entrar'}
             </button>
           </form>
+
+          <p className="login-signup-prompt">
+            Ainda não tem uma conta?{' '}
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setAuthMode('signup')}
+            >
+              Criar conta
+            </button>
+          </p>
         </section>
       </main>
+    )
+  }
+
+  if (profileIncomplete) {
+    return (
+      <CompleteProfileScreen
+        onCompleted={() => {
+          void loadDriver()
+        }}
+        onLogout={() => {
+          void handleLogout()
+        }}
+      />
     )
   }
 
@@ -1958,6 +2035,21 @@ function App() {
           >
             <span>◷</span>
             Histórico
+          </button>
+
+          <button
+            type="button"
+            className={
+              view === 'restaurants'
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              navigate('restaurants')
+            }
+          >
+            <span>🏬</span>
+            Meus restaurantes
           </button>
 
           <button
@@ -2565,6 +2657,8 @@ function App() {
           </p>
         </div>
       </section>
+
+      <ThemeSelector />
     </>
   )
 
@@ -3010,6 +3104,13 @@ function App() {
             historyView}
 
           {view === 'route' && <MyRouteScreen onFinished={() => navigate('home')} />}
+
+          {view === 'restaurants' &&
+            (driverProfileId ? (
+              <MyRestaurantsScreen driverProfileId={driverProfileId} />
+            ) : (
+              <p className="description">Carregando...</p>
+            ))}
         </div>
       </section>
 

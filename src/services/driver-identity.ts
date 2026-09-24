@@ -26,3 +26,37 @@ export async function ensureDriverProfile(): Promise<DriverProfile> {
   if (!data) throw new Error('Falha ao preparar o perfil de entregador.')
   return data as DriverProfile
 }
+
+/**
+ * Chamada uma única vez, logo após supabase.auth.signUp() (a sessão já
+ * está ativa nesse ponto). Converge para o mesmo driver_profiles de
+ * ensureDriverProfile() — grava nome/CPF/telefone e resolve qualquer
+ * convite pendente (restaurant_driver_invites) para o e-mail da conta.
+ */
+export async function completeDriverSignup(
+  fullName: string,
+  cpf: string,
+  phone: string,
+): Promise<DriverProfile> {
+  const { data, error } = await supabase.rpc('complete_driver_signup', {
+    _full_name: fullName,
+    _cpf: cpf,
+    _phone: phone,
+  })
+  if (error) throw error
+  if (!data) throw new Error('Falha ao concluir o cadastro.')
+  return data as DriverProfile
+}
+
+export type MyRestaurantLink = {
+  organization_id: string
+  organization_name: string
+  status: 'active' | 'inactive'
+  linked_at: string
+}
+
+export async function fetchMyRestaurants(): Promise<MyRestaurantLink[]> {
+  const { data, error } = await supabase.rpc('my_driver_restaurants')
+  if (error) throw error
+  return (data as MyRestaurantLink[] | null) ?? []
+}
