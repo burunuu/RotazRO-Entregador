@@ -489,6 +489,13 @@ function App() {
 
   const lastLocationAttemptAt = useRef(0)
   const locationSyncInFlight = useRef(false)
+  // Trabalho ativo (entre iniciar e encerrar). Impede que um envio de GPS que
+  // ainda estava em voo ou um callback tardio do plugin regrave posição/presença
+  // "online" DEPOIS de encerrar o trabalho (deixaria coordenadas velhas no Admin).
+  const workActive = useRef(false)
+  const locationSyncPromise = useRef<Promise<void> | null>(null)
+  // Offline + clear em andamento; o logout espera antes do signOut (sem sessão as RPCs falham).
+  const offlineCleanup = useRef<Promise<void> | null>(null)
 
   // =========================================================
   // RELÓGIO
@@ -1281,6 +1288,7 @@ function App() {
     const now = Date.now()
 
     if (
+      !workActive.current ||
       now - lastLocationAttemptAt.current <
         LOCATION_SYNC_INTERVAL_MS ||
       locationSyncInFlight.current
@@ -1290,6 +1298,11 @@ function App() {
 
     lastLocationAttemptAt.current = now
     locationSyncInFlight.current = true
+
+    let releaseSync: () => void = () => {}
+    locationSyncPromise.current = new Promise<void>((resolve) => {
+      releaseSync = resolve
+    })
 
     try {
       setSyncError(null)
@@ -1370,13 +1383,15 @@ function App() {
       // Sinal de disponibilidade para o despacho regional — nunca pode
       // interromper o GPS legado acima, por isso não é aguardado nem
       // lança: updateMyPresence já engole os próprios erros.
-      void updateMyPresence('online', {
-        latitude,
-        longitude,
-        accuracy,
-        speed,
-        heading,
-      })
+      if (workActive.current) {
+        void updateMyPresence('online', {
+          latitude,
+          longitude,
+          accuracy,
+          speed,
+          heading,
+        })
+      }
 
       const syncedTimestamp = data
         ? new Date(data).getTime()
@@ -1410,6 +1425,7 @@ function App() {
       )
     } finally {
       locationSyncInFlight.current = false
+      releaseSync()
     }
   }
 
@@ -1498,6 +1514,7 @@ function App() {
       }
 
       lastLocationAttemptAt.current = 0
+      workActive.current = true
 
       setGpsStatus(
         'Solicitando permissão...',
@@ -1641,6 +1658,7 @@ function App() {
 
       backgroundTrackingStarted.current =
         false
+      workActive.current = false
 
       setGpsError(message)
 
@@ -1667,6 +1685,8 @@ function App() {
       setGpsBusy(true)
       setGpsError(null)
 
+      workActive.current = false
+
       if (
         Capacitor.isNativePlatform()
       ) {
@@ -1688,22 +1708,35 @@ function App() {
 
       // Sai do pool de matching regional. Não bloqueia o encerramento do
       // trabalho se falhar (já registra o próprio erro).
-      void updateMyPresence('offline', {
-        latitude: location?.latitude ?? null,
-        longitude: location?.longitude ?? null,
-      })
+      // Ordem importa: espera o envio de GPS em voo terminar e só então marca
+      // offline e limpa — em paralelo, um envio tardio poderia gravar depois
+      // do clear e a posição antiga reapareceria.
+      const inFlight = locationSyncPromise.current
+      const lat = location?.latitude ?? null
+      const lng = location?.longitude ?? null
 
-      // Sinal ATIVO de "saí" pro mapa em tempo real — sem isso a posição
-      // corrente só sumiria quando o updated_at envelhecesse. A RPC limpa a
-      // localização corrente de qualquer identidade (legado, vinculado ou
-      // externo) sem apagar histórico. Não bloqueia o encerramento se falhar.
-      void supabase.rpc('clear_my_driver_location').then(({ error }) => {
-        if (error) captureError(error, { event: 'gps.clear_location_failed' })
-      })
+      // Depois do offline, sinal ATIVO de "saí" pro mapa em tempo real: a RPC
+      // limpa a localização corrente de qualquer identidade (legado,
+      // vinculado ou externo) sem apagar histórico. Não bloqueia o
+      // encerramento se falhar.
+      offlineCleanup.current = (async () => {
+        try {
+          if (inFlight) await inFlight
+          await updateMyPresence('offline', { latitude: lat, longitude: lng })
+          const { error } = await supabase.rpc('clear_my_driver_location')
+          if (error) throw error
+        } catch (error) {
+          captureError(error, { event: 'gps.clear_location_failed' })
+        }
+      })()
 
       return true
     } catch (error) {
       captureError(error, { event: 'gps.stop_work_failed' })
+
+      // O plugin não parou: o rastreamento segue ativo, então os envios
+      // continuam valendo.
+      workActive.current = backgroundTrackingStarted.current
 
       const message =
         error &&
@@ -1739,6 +1772,9 @@ function App() {
 
       return
     }
+
+    // offline + clear precisam da sessão ainda válida.
+    await offlineCleanup.current
 
     // Precisa rodar antes do signOut: revoke_my_driver_device() resolve o
     // dono do token via auth.uid(), que exige a sessão ainda autenticada.
