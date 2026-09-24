@@ -77,10 +77,13 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
         <p className="description">Carregando...</p>
       ) : activeRestaurants.length === 0 ? (
         <section className="card">
+          <p>
+            <strong>Nenhum restaurante vinculado ainda.</strong>
+          </p>
           <p className="description">
-            Você ainda não está vinculado a nenhum restaurante. Peça para o restaurante te
-            adicionar pelo seu e-mail de cadastro — o vínculo aparece aqui automaticamente, sem
-            precisar reabrir o aplicativo.
+            Você pode trabalhar como entregador independente e receber vínculos posteriormente.
+            Quando um restaurante te adicionar pelo seu e-mail de cadastro, ele aparece aqui
+            automaticamente.
           </p>
         </section>
       ) : (
