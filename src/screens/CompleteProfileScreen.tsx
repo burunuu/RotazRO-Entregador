@@ -1,22 +1,9 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { completeDriverSignup } from '../services/driver-identity'
-import { formatBrazilPhone } from '../lib/format'
+import { formatBrazilPhone, formatCpf } from '../lib/format'
 import { isValidBrazilianPhone, isValidCpf } from '../lib/validation'
 import { logger } from '../lib/observability/logger'
-
-function formatCpf(value: string): string {
-  const digits = value.replace(/\D/g, '').slice(0, 11)
-  const p1 = digits.slice(0, 3)
-  const p2 = digits.slice(3, 6)
-  const p3 = digits.slice(6, 9)
-  const p4 = digits.slice(9, 11)
-  let out = p1
-  if (p2) out += `.${p2}`
-  if (p3) out += `.${p3}`
-  if (p4) out += `-${p4}`
-  return out
-}
 
 type CompleteProfileScreenProps = {
   onCompleted: () => void
@@ -123,7 +110,7 @@ export function CompleteProfileScreen({ onCompleted, onLogout }: CompleteProfile
           </button>
         </form>
 
-        <button type="button" className="secondary" onClick={onLogout} disabled={busy}>
+        <button type="button" className="text-action" onClick={onLogout} disabled={busy}>
           Sair
         </button>
       </section>

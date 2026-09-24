@@ -19,9 +19,10 @@ import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
 import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
 import { ThemeSelector } from './components/ThemeSelector'
+import { House, CircleUser, History, Store, Route as RouteIcon } from 'lucide-react'
 import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
 import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
-import { formatDuration, formatBrazilPhone, routeStatusLabel } from './lib/format'
+import { formatDuration, formatBrazilPhone, formatCpf, routeStatusLabel } from './lib/format'
 import { captureError } from './lib/observability/capture'
 import { logger } from './lib/observability/logger'
 import './App.css'
@@ -265,6 +266,9 @@ function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [authEmail, setAuthEmail] = useState('')
+  // CPF do próprio usuário — só em memória (state), exibido no perfil;
+  // nunca vai para log/Sentry/localStorage/URL.
+  const [profileCpf, setProfileCpf] = useState('')
 
   const [authenticated, setAuthenticated] = useState(false)
   const [loadingSession, setLoadingSession] = useState(true)
@@ -728,6 +732,13 @@ function App() {
 
     setAuthEmail(user.email ?? '')
 
+    void supabase
+      .from('profiles')
+      .select('cpf')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => setProfileCpf((data?.cpf as string | null) ?? ''))
+
     const { data: account, error: accountError } =
       await supabase
         .from('driver_accounts')
@@ -748,7 +759,7 @@ function App() {
       const profile = await ensureDriverProfile()
 
       if (!profile.is_active) {
-        throw new Error('Este entregador está inativo.')
+        throw new Error('Sua conta de entregador está desativada.')
       }
 
       setProfileIncomplete(!profile.full_name)
@@ -790,7 +801,7 @@ function App() {
     }
 
     if (!driverData.is_active) {
-      throw new Error('Este entregador está inativo.')
+      throw new Error('Sua conta de entregador está desativada.')
     }
 
     const typedDriver = driverData as Driver
@@ -2003,7 +2014,7 @@ function App() {
               navigate('home')
             }
           >
-            <span>⌂</span>
+            <House className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
             Início
           </button>
 
@@ -2018,7 +2029,7 @@ function App() {
               navigate('profile')
             }
           >
-            <span>◯</span>
+            <CircleUser className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
             Meu perfil
           </button>
 
@@ -2033,7 +2044,7 @@ function App() {
               navigate('history')
             }
           >
-            <span>◷</span>
+            <History className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
             Histórico
           </button>
 
@@ -2048,7 +2059,7 @@ function App() {
               navigate('restaurants')
             }
           >
-            <span>🏬</span>
+            <Store className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
             Meus restaurantes
           </button>
 
@@ -2063,7 +2074,7 @@ function App() {
               navigate('route')
             }
           >
-            <span>⊙</span>
+            <RouteIcon className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
             Minha rota
           </button>
         </nav>
@@ -2529,6 +2540,21 @@ function App() {
             O e-mail é vinculado à
             sua conta de acesso.
           </small>
+        </label>
+
+        <label>
+          CPF
+
+          <input
+            type="text"
+            value={
+              profileCpf
+                ? formatCpf(profileCpf)
+                : 'CPF não informado'
+            }
+            readOnly
+            disabled
+          />
         </label>
 
         <label>

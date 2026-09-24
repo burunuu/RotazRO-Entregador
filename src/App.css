@@ -24,6 +24,8 @@
   --warning-bg: #fbeed4;
   --warning-strong: #7a4f08;
 
+  --on-text: #fff;
+
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -60,6 +62,8 @@
   --warning: #e0b355;
   --warning-bg: rgba(224, 179, 85, 0.14);
   --warning-strong: #f0d9a0;
+
+  --on-text: #1a1c22;
 
   color-scheme: dark;
 }
@@ -335,20 +339,14 @@ body {
   text-align: left;
 }
 
-/* Os 4 botões (Início/Meu perfil/Histórico/Minha rota) já compartilhavam
-   exatamente a mesma estrutura/CSS — a caixa do ícone já era idêntica pra
-   todos. O que fazia "Minha rota" parecer fora do eixo era o glifo em si
-   (▤ tem peso visual bem mais denso/preenchido que ⌂ ◯ ◷, que são todos
-   finos/vazados) — trocado por ⊙, mesma família visual dos outros três.
-   display:flex aqui é reforço estrutural: garante a centralização do
-   glifo dentro da caixa de 22px independente de peculiaridade de fonte. */
-.drawer-nav button span {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* Ícones do menu: lucide-react, mesmo tamanho (20px) e stroke (1.75) em
+   todos; caixa fixa de 22px garante o mesmo eixo mesmo com viewBoxes
+   diferentes. Inativo neutro, ativo no laranja da marca. */
+.drawer-nav button .drawer-icon {
+  flex: 0 0 22px;
   width: 22px;
+  height: 22px;
   color: var(--text-muted);
-  font-size: 18px;
 }
 
 .drawer-nav button:hover:not(:disabled) {
@@ -361,7 +359,7 @@ body {
   color: var(--accent-dark);
 }
 
-.drawer-nav button.active span {
+.drawer-nav button.active .drawer-icon {
   color: var(--accent);
 }
 
@@ -1228,7 +1226,7 @@ button {
   border: 1px solid var(--text);
   border-radius: var(--radius-md);
   background: var(--text);
-  color: #fff;
+  color: var(--on-text);
   font: inherit;
   font-size: 14px;
   font-weight: 700;
@@ -1279,10 +1277,31 @@ button.secondary:hover:not(:disabled) {
 }
 
 .login-signup-prompt {
-  margin: 28px 0 0;
+  margin: 32px 0 0;
   text-align: center;
   font-size: 14px;
   color: var(--text-muted);
+}
+
+/* Ações secundárias das telas de autenticação (Sair / Já tenho conta /
+   Voltar para o login): texto discreto, sem caixa — hierarquia clara
+   abaixo do botão principal, mantendo 44px de área de toque. */
+button.text-action {
+  display: flex;
+  width: fit-content;
+  min-height: 44px;
+  margin: 26px auto 0;
+  padding: 0 18px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+button.text-action:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
 }
 
 button.link-button {

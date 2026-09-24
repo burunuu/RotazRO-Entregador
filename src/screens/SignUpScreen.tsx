@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatBrazilPhone } from '../lib/format'
+import { formatBrazilPhone, formatCpf } from '../lib/format'
 import { isValidBrazilianPhone, isValidCpf, normalizeEmail } from '../lib/validation'
 import { logger } from '../lib/observability/logger'
 
@@ -14,19 +14,6 @@ import { logger } from '../lib/observability/logger'
 const AUTH_CONFIRM_REDIRECT_URL = 'https://rotazro.lovable.app/auth/confirm'
 
 const RESEND_COOLDOWN_S = 45
-
-function formatCpf(value: string): string {
-  const digits = value.replace(/\D/g, '').slice(0, 11)
-  const p1 = digits.slice(0, 3)
-  const p2 = digits.slice(3, 6)
-  const p3 = digits.slice(6, 9)
-  const p4 = digits.slice(9, 11)
-  let out = p1
-  if (p2) out += `.${p2}`
-  if (p3) out += `.${p3}`
-  if (p4) out += `-${p4}`
-  return out
-}
 
 type SignUpScreenProps = {
   /** Cadastro concluído com sessão ativa de imediato (confirmação de e-mail
@@ -180,7 +167,7 @@ export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
                 : 'Reenviar e-mail'}
           </button>
 
-          <button type="button" className="secondary" onClick={onCancel}>
+          <button type="button" className="text-action" onClick={onCancel}>
             Voltar para o login
           </button>
         </section>
@@ -275,7 +262,7 @@ export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
           </button>
         </form>
 
-        <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
+        <button type="button" className="text-action" onClick={onCancel} disabled={busy}>
           Já tenho conta
         </button>
       </section>
