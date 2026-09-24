@@ -1693,16 +1693,10 @@ function App() {
         longitude: location?.longitude ?? null,
       })
 
-      // Sinal ATIVO de "saí" pro mapa em tempo real do restaurante — sem
-      // isso, driver_live_locations só ficava sabendo que o entregador
-      // saiu quando o updated_at envelhecia 30s sem write nenhum (é por
-      // isso que "ficar offline" demorava muito mais pra refletir no Web
-      // do que "ficar online", que é sempre um write novo). Mesma política
-      // de "não bloqueia o encerramento se falhar" do updateMyPresence
-      // acima — e o mesmo caminho de identidade (driver_accounts) do
-      // update_my_driver_location, então não tem efeito nenhum pra um
-      // entregador puramente regional (sem conta de "entregador da loja"),
-      // igual o próprio update_my_driver_location já não tem.
+      // Sinal ATIVO de "saí" pro mapa em tempo real — sem isso a posição
+      // corrente só sumiria quando o updated_at envelhecesse. A RPC limpa a
+      // localização corrente de qualquer identidade (legado, vinculado ou
+      // externo) sem apagar histórico. Não bloqueia o encerramento se falhar.
       void supabase.rpc('clear_my_driver_location').then(({ error }) => {
         if (error) captureError(error, { event: 'gps.clear_location_failed' })
       })
