@@ -51,7 +51,7 @@ export async function completeDriverSignup(
 export type MyRestaurantLink = {
   organization_id: string
   organization_name: string
-  status: 'active' | 'inactive'
+  status: 'pending' | 'active' | 'inactive' | 'rejected'
   linked_at: string
 }
 
@@ -59,4 +59,21 @@ export async function fetchMyRestaurants(): Promise<MyRestaurantLink[]> {
   const { data, error } = await supabase.rpc('my_driver_restaurants')
   if (error) throw error
   return (data as MyRestaurantLink[] | null) ?? []
+}
+
+/**
+ * Resposta do próprio entregador a um convite pendente de vínculo — aceitar
+ * ativa o vínculo, recusar não ativa nada. Um convite já respondido (ou que
+ * nunca existiu) não é erro: a RPC só retorna se realmente mudou algo.
+ */
+export async function respondToDriverInvite(
+  organizationId: string,
+  accept: boolean,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('respond_to_driver_invite', {
+    _organization_id: organizationId,
+    _accept: accept,
+  })
+  if (error) throw error
+  return Boolean(data)
 }
