@@ -523,41 +523,12 @@ h2 {
   margin: 0;
 }
 
-.work-badge {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 12px;
-  background: var(--surface-soft);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.work-badge span {
-  width: 8px;
-  height: 8px;
-  background: #aaa69e;
-  border-radius: 999px;
-}
-
-.work-badge.online {
-  background: var(--success-soft);
-  border-color: rgba(45, 155, 97, 0.16);
-  color: var(--success);
-}
-
-.work-badge.online span {
-  background: var(--success);
-}
-
 /* =========================================================
-   DATA / HORA / CLIMA — indicador discreto no topo da Home (não é mais
-   um card próprio; fica junto do work-badge, à direita da saudação).
+   DATA / HORA / CLIMA — indicador discreto no topo da Home. O único
+   indicador "Em trabalho" da tela é o .status dentro de "Status do
+   trabalho" (mais abaixo) — havia um segundo badge aqui (removido) que
+   só repetia a mesma informação de forma mais pobre (binário, sem os
+   estados intermediários que .status/gpsStatus já mostra).
    ========================================================= */
 
 .home-hero-meta {
@@ -576,9 +547,18 @@ h2 {
 }
 
 .home-datetime-weather {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
+}
+
+.home-weather-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
 }
 
 .home-datetime-date {
@@ -725,16 +705,10 @@ h2 {
   text-overflow: ellipsis;
 }
 
-.updated {
-  margin: 14px 0 11px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
 .sync-info {
   display: grid;
   gap: 5px;
-  margin-bottom: 18px;
+  margin: 16px 0 18px;
   padding: 13px 14px;
   background: rgba(201, 134, 43, 0.055);
   border: 1px solid rgba(201, 134, 43, 0.16);
@@ -836,36 +810,6 @@ h2 {
   font-size: 14px;
 }
 
-.theme-selector {
-  margin-top: 16px;
-}
-
-.theme-selector .eyebrow {
-  margin-bottom: 8px;
-}
-
-.theme-selector-options {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.theme-selector-option {
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.theme-selector-option.active {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-dark);
-}
-
 .profile-status-card p {
   margin: 0;
   color: var(--text-muted);
@@ -886,14 +830,83 @@ h2 {
 
 .restaurant-list-item {
   width: 100%;
+  display: grid;
+  gap: 4px;
   padding: 16px 18px;
   text-align: center;
   list-style: none;
   list-style-type: none;
 }
 
-.restaurant-list-item::marker {
+.restaurant-list-item::marker,
+.restaurant-invite-item::marker {
   content: none;
+}
+
+.restaurant-linked-tag {
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* Convites pendentes — mesmo card base, com o pedido do restaurante e os
+   dois botões de resposta abaixo. */
+.restaurant-invite-item {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 18px;
+  text-align: center;
+  list-style: none;
+  list-style-type: none;
+}
+
+.restaurant-invite-item .description {
+  margin: 0;
+}
+
+.restaurant-invite-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+/* Um bloco por estado (convites pendentes / vinculados) — título pequeno
+   acima da lista, espaço claro entre blocos. */
+.restaurant-section {
+  margin-top: 22px;
+}
+
+.restaurant-section:first-of-type {
+  margin-top: 8px;
+}
+
+.restaurant-section-title {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Estado vazio (nenhum vínculo, nenhum convite): título e parágrafo
+   explicativo são dois <p> com margin:0 por padrão (ver reset global) —
+   sem este espaçamento explícito eles ficam colados/sobrepostos. */
+.empty-state {
+  margin-top: 8px;
+}
+
+.empty-state-title {
+  margin: 0 0 10px;
+}
+
+.empty-state .description {
+  max-width: 420px;
+  margin: 0 auto;
+  line-height: 1.6;
 }
 
 .my-restaurants-screen {
@@ -1357,10 +1370,6 @@ button.link-button:active:not(:disabled) {
 
   .home-hero {
     display: grid;
-  }
-
-  .work-badge {
-    width: fit-content;
   }
 }
 

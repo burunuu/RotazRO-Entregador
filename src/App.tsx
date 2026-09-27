@@ -20,6 +20,7 @@ import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
 import { ThemeSelector } from './components/ThemeSelector'
 import { House, CircleUser, History, Store, Route as RouteIcon } from 'lucide-react'
+import { weatherIcon, freshWeatherReading, type WeatherReading } from './lib/weather'
 import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
 import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
 import { formatDuration, formatBrazilPhone, formatCpf, routeStatusLabel } from './lib/format'
@@ -352,9 +353,7 @@ function App() {
     new Date(),
   )
 
-  const [temperature, setTemperature] = useState<
-    number | null
-  >(null)
+  const [weather, setWeather] = useState<WeatherReading | null>(null)
 
   const [weatherLoading, setWeatherLoading] =
     useState(false)
@@ -595,7 +594,7 @@ function App() {
         `https://api.open-meteo.com/v1/forecast` +
         `?latitude=${encodeURIComponent(latitude)}` +
         `&longitude=${encodeURIComponent(longitude)}` +
-        `&current=temperature_2m` +
+        `&current=temperature_2m,weather_code,is_day` +
         `&timezone=auto`
 
       const response = await fetch(url)
@@ -609,14 +608,27 @@ function App() {
       const data = (await response.json()) as {
         current?: {
           temperature_2m?: number
+          weather_code?: number
+          is_day?: number
         }
       }
 
       if (
         typeof data.current?.temperature_2m === 'number' &&
-        Number.isFinite(data.current.temperature_2m)
+        Number.isFinite(data.current.temperature_2m) &&
+        typeof data.current.weather_code === 'number'
       ) {
-        setTemperature(data.current.temperature_2m)
+        setWeather({
+          temperature: data.current.temperature_2m,
+          weatherCode: data.current.weather_code,
+          // Open-Meteo manda 1/0; sem o campo (API antiga/erro de shape),
+          // cai no horário local do aparelho — nunca assume "dia" às cegas.
+          isDay:
+            data.current.is_day != null
+              ? data.current.is_day === 1
+              : new Date().getHours() >= 6 && new Date().getHours() < 18,
+          fetchedAt: now,
+        })
 
         lastWeatherFetchAt.current = now
 
@@ -626,6 +638,8 @@ function App() {
         }
       }
     } catch (error) {
+      // Sem dado novo, o valor cacheado continua na tela até ficar velho
+      // demais (WEATHER_STALE_MS) — nunca trava a UI, nunca finge sucesso.
       console.warn('ERRO_TEMPERATURA:', error)
     } finally {
       setWeatherLoading(false)
@@ -1208,50 +1222,49 @@ function App() {
       setProfileError(null)
       setProfileMessage(null)
 
-      const payload = {
-        name: normalizedName,
+      /*
+       * Salvamos já formatado para a web
+       * receber o mesmo formato.
+       */
+      const normalizedPhone = profilePhone
+        ? formatBrazilPhone(profilePhone)
+        : null
 
-        /*
-         * Salvamos já formatado para a web
-         * receber o mesmo formato.
-         */
-        phone: profilePhone
-          ? formatBrazilPhone(
-              profilePhone,
-            )
-          : null,
+      const normalizedVehicleType =
+        profileVehicleType || null
 
-        vehicle_type:
-          profileVehicleType || null,
+      const normalizedVehiclePlate =
+        profileVehiclePlate
+          .trim()
+          .toUpperCase() || null
 
-        vehicle_plate:
-          profileVehiclePlate
-            .trim()
-            .toUpperCase() || null,
-      }
-
+      // RPC em vez de escrever direto em `drivers`: `driver.id` só é um
+      // drivers.id para o entregador legado (driver_accounts -> drivers) —
+      // para o entregador regional/externo é um driver_profiles.id, e
+      // `drivers` nunca teve policy de UPDATE para o próprio entregador de
+      // qualquer forma. A RPC resolve a identidade certa dos dois lados.
       const { data, error } =
-        await supabase
-          .from('drivers')
-          .update(payload)
-          .eq('id', driver.id)
-          .select(
-            'id, name, phone, vehicle_type, vehicle_plate, is_active, organization_id',
-          )
-          .maybeSingle()
+        await supabase.rpc('update_my_driver_profile', {
+          _name: normalizedName,
+          _phone: normalizedPhone,
+          _vehicle_type: normalizedVehicleType,
+          _vehicle_plate: normalizedVehiclePlate,
+        })
 
       if (error) {
         throw error
       }
 
-      if (!data) {
+      const row = Array.isArray(data) ? data[0] : data
+
+      if (!row) {
         throw new Error(
-          'Seu perfil não pôde ser atualizado. A permissão de edição ainda não está disponível para esta conta.',
+          'Seu perfil não pôde ser atualizado.',
         )
       }
 
       const updatedDriver =
-        data as Driver
+        row as Driver
 
       setDriver(updatedDriver)
 
@@ -1811,7 +1824,7 @@ function App() {
     )
 
     setLastSyncedAt(null)
-    setTemperature(null)
+    setWeather(null)
 
     lastLocationAttemptAt.current = 0
 
@@ -2183,6 +2196,15 @@ function App() {
   // INÍCIO
   // =========================================================
 
+  // Clima "fresco" o bastante pra confiar (WEATHER_STALE_MS) — currentDateTime
+  // reavalia isso a cada 30s (o próprio relógio da Home), então um clima que
+  // envelhece some da tela sozinho, sem precisar de outro timer.
+  const freshWeather = freshWeatherReading(weather, currentDateTime.getTime())
+
+  const WeatherIcon = freshWeather
+    ? weatherIcon(freshWeather.weatherCode, freshWeather.isDay)
+    : null
+
   const homeView = (
     <>
       <section className="home-hero">
@@ -2203,25 +2225,25 @@ function App() {
         <div className="home-hero-meta">
           <div className="home-datetime">
             <span className="home-datetime-weather">
-              {temperature != null ? `${Math.round(temperature)}°C` : weatherLoading ? '...' : '—'} ☀
+              {freshWeather ? (
+                <>
+                  {`${Math.round(freshWeather.temperature)}°C`}
+                  {WeatherIcon && (
+                    <WeatherIcon
+                      className="home-weather-icon"
+                      aria-hidden="true"
+                    />
+                  )}
+                </>
+              ) : weatherLoading ? (
+                '...'
+              ) : (
+                '—'
+              )}
             </span>
             <span className="home-datetime-date">
               {formatShortDate(currentDateTime)} • {formatClock(currentDateTime)}
             </span>
-          </div>
-
-          <div
-            className={`work-badge ${
-              tracking
-                ? 'online'
-                : ''
-            }`}
-          >
-            <span />
-
-            {tracking
-              ? 'Em trabalho'
-              : 'Fora de expediente'}
           </div>
         </div>
       </section>
@@ -2313,14 +2335,6 @@ function App() {
                 : '—'}
             </strong>
           </div>
-        </div>
-
-        <div className="updated">
-          Última leitura:{' '}
-          {formatTime(
-            location?.timestamp ??
-              null,
-          )}
         </div>
 
         <div className="sync-info">
