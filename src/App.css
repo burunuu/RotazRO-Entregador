@@ -34,9 +34,10 @@
   font-synthesis: none;
 }
 
-/* Aplicada em <html> por useAppTheme (src/lib/theme.ts) — nunca preto
-   puro: grafite escuro + cards um tom mais claros + laranja RotazRO
-   preservado, mesma paleta do modo escuro do painel Web. */
+/* Modo escuro desativado por enquanto (rodada de acabamento visual) — o
+   app roda só em modo claro, sem toggle. Este bloco não é mais aplicado
+   por nada (nada mais adiciona a classe .dark em <html>); mantido como
+   base técnica caso o modo escuro volte a ser oferecido. */
 .dark {
   --bg: #1a1c22;
   --surface: #262930;

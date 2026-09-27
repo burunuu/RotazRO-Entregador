@@ -18,7 +18,6 @@ import { SignUpScreen } from './screens/SignUpScreen'
 import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
 import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
-import { ThemeSelector } from './components/ThemeSelector'
 import { House, CircleUser, History, Store, Route as RouteIcon } from 'lucide-react'
 import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
 import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
@@ -1573,7 +1572,7 @@ function App() {
       await BackgroundGeolocation.start(
         {
           backgroundTitle:
-            'RotazRO Entregador',
+            'RotazRO',
 
           backgroundMessage:
             'Sua localização está ativa enquanto você realiza entregas.',
@@ -2714,7 +2713,6 @@ function App() {
         </div>
       </section>
 
-      <ThemeSelector />
     </>
   )
 
