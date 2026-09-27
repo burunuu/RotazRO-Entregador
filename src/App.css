@@ -949,7 +949,7 @@ h2 {
   background: var(--success-soft);
   border: 1px solid rgba(45, 155, 97, 0.15);
   border-radius: var(--radius-sm);
-  color: #23794c;
+  color: var(--success);
   font-size: 13px;
 }
 
@@ -1181,7 +1181,8 @@ select {
   min-height: 50px;
   padding: 0 14px;
   appearance: none;
-  background: #fff;
+  -webkit-appearance: none;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   outline: none;
@@ -1196,8 +1197,8 @@ select {
 select {
   padding-right: 42px;
   background-image:
-    linear-gradient(45deg, transparent 50%, #77736d 50%),
-    linear-gradient(135deg, #77736d 50%, transparent 50%);
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
   background-position:
     calc(100% - 19px) 21px,
     calc(100% - 14px) 21px;
@@ -1214,7 +1215,7 @@ select:hover {
 
 input:focus,
 select:focus {
-  background-color: #fffefa;
+  background-color: var(--surface);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -1223,6 +1224,21 @@ input:disabled {
   background: var(--surface-soft);
   color: var(--text-muted);
   cursor: not-allowed;
+}
+
+/* O Chrome pinta campos de login/senha reconhecidos com um fundo nativo
+   próprio (autofill) que ignora `background` normal — sem isso, o campo
+   de e-mail/senha aparecia cinza-claro sólido mesmo no escuro, mesmo já
+   usando var(--surface) acima. A sombra inset "empurra" a cor da app por
+   cima da pintura nativa; a transição gigante evita o flash amarelo do
+   Chrome durante a troca. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0px 1000px var(--surface) inset;
+  box-shadow: 0 0 0px 1000px var(--surface) inset;
+  transition: background-color 9999s ease-in-out 0s;
 }
 
 /* =========================================================
@@ -1257,7 +1273,11 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #2b2b2b;
+  /* Mistura com --bg em vez de um tom fixo: o botão padrão é preenchido
+     com --text, que inverte entre os temas (quase-preto no claro,
+     quase-branco no escuro) — um hover fixo do lado errado apagava o
+     contraste no escuro. */
+  background: color-mix(in srgb, var(--text) 85%, var(--bg) 15%);
 }
 
 button:active:not(:disabled) {
@@ -1275,14 +1295,14 @@ button:disabled {
 }
 
 button.secondary {
-  background: #e7e1d7;
-  border-color: #e7e1d7;
+  background: var(--surface-strong);
+  border-color: var(--surface-strong);
   color: var(--text);
 }
 
 button.secondary:hover:not(:disabled) {
-  background: #ddd6ca;
-  border-color: #ddd6ca;
+  background: color-mix(in srgb, var(--surface-strong) 85%, var(--text) 15%);
+  border-color: color-mix(in srgb, var(--surface-strong) 85%, var(--text) 15%);
 }
 
 .work-button {
@@ -1815,7 +1835,7 @@ button.secondary {
   font-size: 13px;
   font-weight: 700;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-text);
 }
 
 .route-stop-badge.done {
@@ -1825,7 +1845,7 @@ button.secondary {
 
 .route-stop-badge.warning {
   background: var(--warning);
-  color: #fff;
+  color: var(--on-text);
 }
 
 .route-stop-main {
@@ -1936,7 +1956,7 @@ button.secondary {
 .button-warning {
   background: var(--warning);
   border-color: var(--warning);
-  color: #fff;
+  color: var(--on-text);
 }
 
 .route-finished-message {
@@ -2033,7 +2053,7 @@ button.secondary {
   height: 48px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-text);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2113,7 +2133,7 @@ button.secondary {
 .button-accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-text);
 }
 
 .button-accent:hover:not(:disabled) {
