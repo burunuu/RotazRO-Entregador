@@ -183,6 +183,7 @@ export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
             type="button"
             className="button-accent"
             disabled={currentRoute.actionBusy}
+            aria-busy={currentRoute.actionBusy}
             onClick={() => void currentRoute.start(route.id)}
           >
             {currentRoute.actionBusy ? 'Iniciando...' : 'Iniciar rota'}
@@ -252,6 +253,7 @@ export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
             type="button"
             className="button-accent"
             disabled={currentRoute.actionBusy}
+            aria-busy={currentRoute.actionBusy}
             onClick={() => {
               // Snapshot antes de chamar complete(): assim que o status vira
               // completed, fetchMyActiveRoute() para de devolver esta rota

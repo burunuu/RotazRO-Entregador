@@ -10,9 +10,16 @@ type MyRestaurantsScreenProps = {
 export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProps) {
   const [restaurants, setRestaurants] = useState<MyRestaurantLink[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // organization_id em resposta no momento — trava os dois botões desse
-  // card específico (não a tela inteira) contra duplo toque.
-  const [respondingTo, setRespondingTo] = useState<string | null>(null)
+  // Convite em resposta no momento — trava os dois botões desse card
+  // específico (não a tela inteira) contra duplo toque. Guarda também QUAL
+  // ação (aceitar/recusar) para o botão certo mostrar "-ando..." (os dois
+  // antes só comparavam organization_id, então recusar fazia o botão
+  // "Aceitar" mostrar "Aceitando..." por engano).
+  const [respondingAction, setRespondingAction] = useState<{
+    organizationId: string
+    accept: boolean
+  } | null>(null)
+  const respondingTo = respondingAction?.organizationId ?? null
   const [respondError, setRespondError] = useState<string | null>(null)
 
   async function load() {
@@ -69,7 +76,7 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
     if (respondingTo) return
 
     try {
-      setRespondingTo(organizationId)
+      setRespondingAction({ organizationId, accept })
       setRespondError(null)
       await respondToDriverInvite(organizationId, accept)
       // O Realtime acima também refaz o load, mas refazer aqui evita a
@@ -81,7 +88,7 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
         err instanceof Error ? err.message : 'Não foi possível responder ao convite.',
       )
     } finally {
-      setRespondingTo(null)
+      setRespondingAction(null)
     }
   }
 
@@ -117,17 +124,25 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
                       <button
                         type="button"
                         disabled={respondingTo === r.organization_id}
+                        aria-busy={respondingTo === r.organization_id}
                         onClick={() => void respond(r.organization_id, true)}
                       >
-                        {respondingTo === r.organization_id ? 'Aceitando...' : 'Aceitar'}
+                        {respondingAction?.organizationId === r.organization_id &&
+                        respondingAction.accept
+                          ? 'Aceitando...'
+                          : 'Aceitar'}
                       </button>
                       <button
                         type="button"
                         className="secondary"
                         disabled={respondingTo === r.organization_id}
+                        aria-busy={respondingTo === r.organization_id}
                         onClick={() => void respond(r.organization_id, false)}
                       >
-                        Recusar
+                        {respondingAction?.organizationId === r.organization_id &&
+                        !respondingAction.accept
+                          ? 'Recusando...'
+                          : 'Recusar'}
                       </button>
                     </div>
                   </li>

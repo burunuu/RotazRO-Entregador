@@ -1,4 +1,5 @@
-import { useAppTheme, type AppTheme } from '../lib/theme'
+import type { AppTheme } from '../lib/theme'
+import { useAppTheme } from '../lib/theme-runtime'
 
 const OPTIONS: { value: AppTheme; label: string }[] = [
   { value: 'light', label: 'Claro' },

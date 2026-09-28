@@ -142,6 +142,7 @@ export function RouteStopCard({ stop, isNext, running, busy, onDeliver }: RouteS
             type="button"
             className="button-accent"
             disabled={!running || busy}
+            aria-busy={busy}
             onClick={() => {
               if (window.confirm(`Confirmar entrega de ${stop.customerName}?`)) onDeliver()
             }}

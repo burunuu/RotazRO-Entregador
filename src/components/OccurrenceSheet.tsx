@@ -106,6 +106,7 @@ export function OccurrenceSheet({ open, stops, busy, error, onClose, onConfirm }
               type="button"
               className="button-accent occurrence-sheet-confirm"
               disabled={busy}
+              aria-busy={busy}
               onClick={() => selectedId && onConfirm(selectedId, occurrenceType, note)}
             >
               {busy ? 'Registrando...' : 'Confirmar ocorrência'}

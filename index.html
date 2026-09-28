@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RotazRO</title>
+    <script>
+      // Antes da primeira pintura: evita piscar claro quando o app abre em escuro.
+      // Mesma regra de src/lib/theme.ts (a preferência "system" acompanha o Android).
+      try {
+        var p = localStorage.getItem('rotazro-theme')
+        var dark =
+          p === 'dark' ||
+          (p !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

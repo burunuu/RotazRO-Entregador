@@ -1,60 +1,181 @@
-import { useCallback, useEffect, useState } from 'react'
+/**
+ * Tema do app — preferência do usuário × tema resolvido.
+ *
+ *   preference  light | dark | system   (o que o usuário escolheu; é o que se salva)
+ *   resolved    light | dark            (o que é aplicado ao DOM)
+ *
+ * "system" NUNCA é gravado como "dark"/"light": a preferência continua
+ * "system" e só o tema resolvido acompanha o Android.
+ *
+ * Este módulo é puro (sem Capacitor, sem window): todas as dependências do
+ * ambiente entram por `ThemeDeps`, o que permite testar o comportamento sem
+ * WebView. A ligação real (localStorage, matchMedia, Capacitor App) está em
+ * ./theme-runtime.ts.
+ */
 
 export type AppTheme = 'light' | 'dark' | 'system'
+export type ResolvedTheme = 'light' | 'dark'
 
-const STORAGE_KEY = 'rotazro-theme'
+export const THEME_STORAGE_KEY = 'rotazro-theme'
+export const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)'
 
-function readStoredTheme(): AppTheme {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system'
-  } catch {
-    return 'system'
-  }
+/** Reavaliações extras depois de voltar ao primeiro plano: alguns WebViews
+ * só refletem a mudança do sistema alguns instantes após o resume. */
+const RESUME_RECHECK_DELAYS_MS = [300, 1200]
+
+export type MediaQueryListLike = {
+  matches: boolean
+  addEventListener?: (type: 'change', listener: () => void) => void
+  removeEventListener?: (type: 'change', listener: () => void) => void
+  /** WebViews Android antigos só têm a API legada. */
+  addListener?: (listener: () => void) => void
+  removeListener?: (listener: () => void) => void
 }
 
-function prefersDark(): boolean {
-  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
+export type ThemeDeps = {
+  storage: Pick<Storage, 'getItem' | 'setItem'> | null
+  matchMedia: ((query: string) => MediaQueryListLike) | null
+  /** Aplica o tema JÁ RESOLVIDO ao DOM (idempotente). */
+  applyResolved: (theme: ResolvedTheme) => void
+  /** Chama `cb` sempre que o app volta ao primeiro plano; devolve o cancelamento. */
+  onAppActive: (cb: () => void) => () => void
+  /** Agenda `fn`; devolve o cancelamento. */
+  schedule: (fn: () => void, ms: number) => () => void
 }
 
-function applyResolvedTheme(theme: AppTheme) {
-  const isDark = theme === 'dark' || (theme === 'system' && prefersDark())
-  document.documentElement.classList.toggle('dark', isDark)
+export type ThemeController = {
+  init: () => void
+  getPreference: () => AppTheme
+  getResolved: () => ResolvedTheme
+  setPreference: (next: AppTheme) => void
+  /** Reavalia o sistema agora (usado no resume e nos testes). */
+  resync: () => void
+  subscribe: (listener: () => void) => () => void
+  /** Quantos observadores do sistema estão ativos (0 ou 1) — diagnóstico/testes. */
+  activeWatchers: () => number
 }
 
-/** "Sistema" é o padrão recomendado — acompanha prefers-color-scheme e
- * continua acompanhando trocas ao vivo (celular muda de claro pra escuro
- * com o app aberto) enquanto o modo escolhido continuar sendo "system".
- * Preferência salva é só light/dark/system — não é dado sensível. */
-export function useAppTheme(): [AppTheme, (theme: AppTheme) => void] {
-  const [theme, setThemeState] = useState<AppTheme>(() =>
-    typeof document === 'undefined' ? 'system' : readStoredTheme(),
-  )
+export function isAppTheme(value: unknown): value is AppTheme {
+  return value === 'light' || value === 'dark' || value === 'system'
+}
 
-  useEffect(() => {
-    const stored = readStoredTheme()
-    setThemeState(stored)
-    applyResolvedTheme(stored)
-  }, [])
+export function createThemeController(deps: ThemeDeps): ThemeController {
+  const subscribers = new Set<() => void>()
+  let preference: AppTheme = readPreference()
+  let resolved: ResolvedTheme = resolve()
+  let stopWatching: (() => void) | null = null
 
-  useEffect(() => {
-    if (theme !== 'system' || typeof matchMedia !== 'function') return
-    const media = matchMedia('(prefers-color-scheme: dark)')
-    const onChange = () => applyResolvedTheme('system')
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
-  }, [theme])
-
-  const setTheme = useCallback((next: AppTheme) => {
-    setThemeState(next)
-    applyResolvedTheme(next)
+  function readPreference(): AppTheme {
     try {
-      localStorage.setItem(STORAGE_KEY, next)
+      const stored = deps.storage?.getItem(THEME_STORAGE_KEY)
+      return isAppTheme(stored) ? stored : 'system'
     } catch {
-      // Preferência de tema não é essencial — se o storage estiver
-      // bloqueado, só não persiste entre sessões.
+      return 'system'
     }
-  }, [])
+  }
 
-  return [theme, setTheme]
+  function osPrefersDark(): boolean {
+    try {
+      return Boolean(deps.matchMedia?.(DARK_MEDIA_QUERY).matches)
+    } catch {
+      return false
+    }
+  }
+
+  function resolve(): ResolvedTheme {
+    if (preference === 'dark') return 'dark'
+    if (preference === 'light') return 'light'
+    return osPrefersDark() ? 'dark' : 'light'
+  }
+
+  function notify() {
+    subscribers.forEach((listener) => listener())
+  }
+
+  /** Recalcula e aplica. Sempre reaplica ao DOM (idempotente) e só avisa a UI
+   * quando algo realmente mudou. */
+  function sync(forceNotify = false) {
+    const next = resolve()
+    const changed = next !== resolved
+    resolved = next
+    deps.applyResolved(resolved)
+    if (changed || forceNotify) notify()
+  }
+
+  function startWatching() {
+    if (stopWatching) return // nunca dois observadores
+
+    const cleanups: Array<() => void> = []
+
+    let mql: MediaQueryListLike | null = null
+    try {
+      mql = deps.matchMedia ? deps.matchMedia(DARK_MEDIA_QUERY) : null
+    } catch {
+      mql = null
+    }
+    if (mql) {
+      const onChange = () => sync()
+      const list = mql
+      if (typeof list.addEventListener === 'function' && typeof list.removeEventListener === 'function') {
+        list.addEventListener('change', onChange)
+        cleanups.push(() => list.removeEventListener!('change', onChange))
+      } else if (typeof list.addListener === 'function' && typeof list.removeListener === 'function') {
+        list.addListener(onChange)
+        cleanups.push(() => list.removeListener!(onChange))
+      }
+    }
+
+    const pendingRechecks = new Set<() => void>()
+    const offApp = deps.onAppActive(() => {
+      sync()
+      for (const delay of RESUME_RECHECK_DELAYS_MS) {
+        const cancel = deps.schedule(() => {
+          pendingRechecks.delete(cancel)
+          sync()
+        }, delay)
+        pendingRechecks.add(cancel)
+      }
+    })
+    cleanups.push(offApp)
+    cleanups.push(() => {
+      pendingRechecks.forEach((cancel) => cancel())
+      pendingRechecks.clear()
+    })
+
+    stopWatching = () => {
+      cleanups.forEach((fn) => fn())
+      stopWatching = null
+    }
+  }
+
+  return {
+    init() {
+      preference = readPreference()
+      sync()
+      if (preference === 'system') startWatching()
+      else stopWatching?.()
+    },
+    getPreference: () => preference,
+    getResolved: () => resolved,
+    setPreference(next) {
+      preference = next
+      try {
+        deps.storage?.setItem(THEME_STORAGE_KEY, next)
+      } catch {
+        // Preferência de tema não é essencial — se o storage estiver
+        // bloqueado, só não persiste entre sessões.
+      }
+      if (next === 'system') startWatching()
+      else stopWatching?.()
+      sync(true) // a preferência mudou mesmo que o tema resolvido não tenha mudado
+    },
+    resync: () => sync(),
+    subscribe(listener) {
+      subscribers.add(listener)
+      return () => {
+        subscribers.delete(listener)
+      }
+    },
+    activeWatchers: () => (stopWatching ? 1 : 0),
+  }
 }

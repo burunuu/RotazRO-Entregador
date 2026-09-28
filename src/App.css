@@ -35,6 +35,10 @@
   /* Borda de hover de input/select (era #c8c0b5 fixo). */
   --border-strong: #c8c0b5;
 
+  /* Estado de sucesso do botão ("Salvo ✓"): preenchimento verde sólido. */
+  --success-solid: #23794c;
+  --success-solid-fg: #fff;
+
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -78,6 +82,15 @@
   --btn-fg: #1a1c22;
 
   --border-strong: rgba(255, 255, 255, 0.28);
+
+  --success-solid: #4db47e;
+  --success-solid-fg: #0f2418;
+
+  /* Botão desabilitado no escuro: superfície elevada + texto muted (4,5:1),
+     em vez de opacity .55 — que derrubava fundo e texto juntos (~3:1). */
+  --btn-disabled-bg: var(--surface-strong);
+  --btn-disabled-fg: var(--text-muted);
+  --btn-disabled-border: var(--border);
 
   color-scheme: dark;
 }
@@ -1420,6 +1433,29 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Carregando (aria-busy): o botão fica desabilitado contra duplo toque, mas
+   mantém as cores NORMAIS e legíveis (texto "Salvando...", "Iniciando..."). */
+button[aria-busy='true']:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+/* Escuro: desabilitado = superfície elevada + texto muted, sem opacity. */
+.dark button:disabled:not([aria-busy='true']) {
+  opacity: 1;
+  background: var(--btn-disabled-bg);
+  border-color: var(--btn-disabled-border);
+  color: var(--btn-disabled-fg);
+}
+
+/* Sucesso no próprio botão (ação que permanece na tela): "Salvo ✓". */
+button.is-success,
+button.is-success:hover:not(:disabled) {
+  background: var(--success-solid);
+  border-color: var(--success-solid);
+  color: var(--success-solid-fg);
+}
+
 button.secondary {
   background: var(--surface-strong);
   border-color: var(--surface-strong);
@@ -2275,8 +2311,14 @@ button.secondary {
 .button-accent:disabled {
   background: var(--surface-strong);
   border-color: var(--surface-strong);
-  color: var(--text-soft);
+  color: var(--text-muted);
   opacity: 1;
+}
+
+.button-accent[aria-busy='true']:disabled {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-text);
 }
 
 .route-problem-button {

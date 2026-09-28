@@ -21,6 +21,7 @@ import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
 import { ThemeSelector } from './components/ThemeSelector'
 import { House, History, Store, ChevronRight, Route as RouteIcon } from 'lucide-react'
 import { weatherIcon, freshWeatherReading, type WeatherReading } from './lib/weather'
+import { useTransientFlag } from './lib/transient-flag'
 import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
 import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
 import { formatDuration, formatBrazilPhone, formatCpf, routeStatusLabel } from './lib/format'
@@ -379,6 +380,10 @@ function App() {
     useState('')
 
   const [profileSaving, setProfileSaving] = useState(false)
+  // "Salvo ✓" no próprio botão por ~1,8 s; o ref bloqueia duplo toque mesmo antes
+  // do re-render que desabilita o botão.
+  const [profileSaved, flashProfileSaved, clearProfileSaved] = useTransientFlag()
+  const profileSavingRef = useRef(false)
 
   const [profileMessage, setProfileMessage] =
     useState<string | null>(null)
@@ -1204,7 +1209,7 @@ function App() {
   ) {
     event.preventDefault()
 
-    if (!driver) return
+    if (!driver || profileSavingRef.current) return
 
     const normalizedName =
       profileName.trim()
@@ -1218,7 +1223,9 @@ function App() {
     }
 
     try {
+      profileSavingRef.current = true
       setProfileSaving(true)
+      clearProfileSaved()
       setProfileError(null)
       setProfileMessage(null)
 
@@ -1275,6 +1282,7 @@ function App() {
       setProfileMessage(
         'Perfil atualizado. As alterações também ficam disponíveis para o restaurante.',
       )
+      flashProfileSaved()
     } catch (error) {
       captureError(error, { event: 'profile.save_failed' })
 
@@ -1296,6 +1304,7 @@ function App() {
 
       setProfileError(message)
     } finally {
+      profileSavingRef.current = false
       setProfileSaving(false)
     }
   }
@@ -1973,6 +1982,7 @@ function App() {
             <button
               type="submit"
               disabled={loginLoading}
+              aria-busy={loginLoading}
             >
               {loginLoading
                 ? 'Entrando...'
@@ -2380,6 +2390,7 @@ function App() {
               void startGps()
             }}
             disabled={gpsBusy}
+            aria-busy={gpsBusy}
           >
             {gpsBusy
               ? 'Iniciando...'
@@ -2423,6 +2434,7 @@ function App() {
               })()
             }}
             disabled={gpsBusy || activeRouteCheckBusy}
+            aria-busy={gpsBusy || activeRouteCheckBusy}
           >
             {gpsBusy
               ? 'Encerrando...'
@@ -2731,10 +2743,18 @@ function App() {
         <button
           type="submit"
           disabled={profileSaving}
+          aria-busy={profileSaving}
+          className={
+            profileSaved && !profileSaving
+              ? 'is-success'
+              : undefined
+          }
         >
           {profileSaving
             ? 'Salvando...'
-            : 'Salvar alterações'}
+            : profileSaved
+              ? 'Salvo ✓'
+              : 'Salvar alterações'}
         </button>
       </form>
 
