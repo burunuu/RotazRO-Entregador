@@ -19,7 +19,7 @@ import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
 import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
 import { ThemeSelector } from './components/ThemeSelector'
-import { House, CircleUser, History, Store, Route as RouteIcon } from 'lucide-react'
+import { House, History, Store, ChevronRight, Route as RouteIcon } from 'lucide-react'
 import { weatherIcon, freshWeatherReading, type WeatherReading } from './lib/weather'
 import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
 import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
@@ -1278,10 +1278,19 @@ function App() {
     } catch (error) {
       captureError(error, { event: 'profile.save_failed' })
 
-      const message =
+      // Erros técnicos do PostgREST (função/coluna fora do schema cache, etc.)
+      // não dizem nada ao entregador — o detalhe vai para o Sentry acima.
+      const technical =
         error &&
         typeof error === 'object' &&
-        'message' in error
+        'code' in error &&
+        /^(PGRST|42883|42703)/.test(String(error.code))
+
+      const message = technical
+        ? 'Não foi possível salvar agora. Tente novamente mais tarde.'
+        : error &&
+            typeof error === 'object' &&
+            'message' in error
           ? String(error.message)
           : 'Não foi possível atualizar seu perfil.'
 
@@ -2021,7 +2030,23 @@ function App() {
           menuOpen ? 'open' : ''
         }`}
       >
-        <div className="drawer-profile">
+        <button
+          type="button"
+          className={`drawer-profile ${
+            view === 'profile'
+              ? 'active'
+              : ''
+          }`}
+          aria-label="Abrir meu perfil"
+          aria-current={
+            view === 'profile'
+              ? 'page'
+              : undefined
+          }
+          onClick={() =>
+            navigate('profile')
+          }
+        >
           <div className="drawer-avatar">
             {driver.name
               .trim()
@@ -2029,7 +2054,7 @@ function App() {
               .toUpperCase()}
           </div>
 
-          <div>
+          <div className="drawer-profile-text">
             <strong>
               {driver.name}
             </strong>
@@ -2043,7 +2068,14 @@ function App() {
                 : ''}
             </span>
           </div>
-        </div>
+
+          <ChevronRight
+            className="drawer-profile-chevron"
+            size={18}
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
+        </button>
 
         <nav className="drawer-nav">
           <button
@@ -2064,31 +2096,16 @@ function App() {
           <button
             type="button"
             className={
-              view === 'profile'
+              view === 'route'
                 ? 'active'
                 : ''
             }
             onClick={() =>
-              navigate('profile')
+              navigate('route')
             }
           >
-            <CircleUser className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
-            Meu perfil
-          </button>
-
-          <button
-            type="button"
-            className={
-              view === 'history'
-                ? 'active'
-                : ''
-            }
-            onClick={() =>
-              navigate('history')
-            }
-          >
-            <History className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
-            Histórico
+            <RouteIcon className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
+            Minha rota
           </button>
 
           <button
@@ -2109,16 +2126,16 @@ function App() {
           <button
             type="button"
             className={
-              view === 'route'
+              view === 'history'
                 ? 'active'
                 : ''
             }
             onClick={() =>
-              navigate('route')
+              navigate('history')
             }
           >
-            <RouteIcon className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
-            Minha rota
+            <History className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
+            Histórico
           </button>
         </nav>
 
@@ -2554,6 +2571,12 @@ function App() {
         className="profile-form"
         onSubmit={saveProfile}
       >
+        <section className="profile-section">
+        <h2 className="profile-section-title">
+          Dados pessoais
+        </h2>
+
+        <div className="profile-card">
         <label>
           Nome completo
 
@@ -2632,6 +2655,15 @@ function App() {
           />
         </label>
 
+        </div>
+        </section>
+
+        <section className="profile-section">
+        <h2 className="profile-section-title">
+          Veículo
+        </h2>
+
+        <div className="profile-card">
         <label>
           Tipo de veículo
 
@@ -2693,6 +2725,8 @@ function App() {
             autoCapitalize="characters"
           />
         </label>
+        </div>
+        </section>
 
         <button
           type="submit"
@@ -2704,7 +2738,14 @@ function App() {
         </button>
       </form>
 
-      <section className="profile-status-card">
+      <ThemeSelector />
+
+      <section className="profile-section">
+        <h2 className="profile-section-title">
+          Status
+        </h2>
+
+      <div className="profile-status-card">
         <span
           className={`profile-status-icon ${
             tracking
@@ -2726,9 +2767,8 @@ function App() {
               : 'Sua localização não está sendo compartilhada.'}
           </p>
         </div>
+      </div>
       </section>
-
-      <ThemeSelector />
     </>
   )
 

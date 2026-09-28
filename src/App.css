@@ -274,12 +274,37 @@ body {
   transform: translateX(0);
 }
 
+/* Card do usuário no topo do menu — é um <button> que abre "Meu perfil".
+   Sobrescreve o estilo global de button (fundo --text, largura total). */
 .drawer-profile {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 12px;
-  padding: 8px 4px 24px;
-  border-bottom: 1px solid var(--border);
+  width: 100%;
+  min-height: 0;
+  padding: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-weight: 400;
+  text-align: left;
+}
+
+.drawer-profile:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+.drawer-profile.active,
+.drawer-profile.active:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: rgba(201, 134, 43, 0.25);
+}
+
+.drawer-profile-chevron {
+  flex: 0 0 auto;
+  color: var(--text-muted);
 }
 
 .drawer-avatar {
@@ -296,8 +321,9 @@ body {
   font-weight: 800;
 }
 
-.drawer-profile > div:last-child {
+.drawer-profile-text {
   display: grid;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 4px;
 }
@@ -783,6 +809,39 @@ h2 {
 
 .profile-form {
   display: grid;
+  gap: 24px;
+}
+
+/* Seções da tela de perfil (Dados pessoais, Veículo, Preferências, Status):
+   título pequeno fora do card + card com os campos. Seções fora do
+   formulário (Preferências, Status) ganham o mesmo espaçamento entre si. */
+.profile-section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.profile-form ~ .profile-section {
+  margin-top: 24px;
+}
+
+.profile-section-title {
+  margin: 0 0 0 4px;
+  color: var(--text-muted);
+  font-family:
+    'IBM Plex Mono',
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.profile-card {
+  display: grid;
   gap: 18px;
   padding: 22px;
   background: var(--surface);
@@ -790,11 +849,57 @@ h2 {
   border-radius: var(--radius-lg);
 }
 
+.theme-selector-head {
+  display: grid;
+  gap: 4px;
+}
+
+.theme-selector-head strong {
+  font-size: 14px;
+}
+
+.theme-selector-head .field-help {
+  margin-top: 0;
+}
+
+/* Controle segmentado Claro / Escuro / Sistema — sobrescreve o estilo
+   global de button (que é largura total, fundo --text). */
+.theme-selector-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.theme-selector-option {
+  min-height: 42px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.theme-selector-option:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+.theme-selector-option.active,
+.theme-selector-option.active:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: rgba(201, 134, 43, 0.25);
+  color: var(--accent-dark);
+}
+
 .profile-status-card {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  margin-top: 16px;
   padding: 17px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1407,7 +1512,7 @@ button.link-button:active:not(:disabled) {
 
   .section-block,
   .monthly-summary,
-  .profile-form {
+  .profile-card {
     padding: 18px;
     border-radius: 18px;
   }
