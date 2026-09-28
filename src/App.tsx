@@ -1586,7 +1586,7 @@ function App() {
       await BackgroundGeolocation.start(
         {
           backgroundTitle:
-            'RotazRO Entregador',
+            'RotazRO',
 
           backgroundMessage:
             'Sua localização está ativa enquanto você realiza entregas.',
