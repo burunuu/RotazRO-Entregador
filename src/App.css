@@ -26,6 +26,15 @@
 
   --on-text: #fff;
 
+  /* Botão primário padrão (Iniciar trabalho, Salvar alterações, Entrar…).
+     No claro é o grafite de sempre; no escuro vira o âmbar da marca com
+     texto escuro — em vez de um bloco quase-branco (era var(--text)). */
+  --btn-bg: var(--text);
+  --btn-fg: var(--on-text);
+
+  /* Borda de hover de input/select (era #c8c0b5 fixo). */
+  --border-strong: #c8c0b5;
+
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -64,6 +73,11 @@
   --warning-strong: #f0d9a0;
 
   --on-text: #1a1c22;
+
+  --btn-bg: var(--accent);
+  --btn-fg: #1a1c22;
+
+  --border-strong: rgba(255, 255, 255, 0.28);
 
   color-scheme: dark;
 }
@@ -166,8 +180,8 @@ body {
     max(10px, env(safe-area-inset-top))
     18px
     10px;
-  background: rgba(244, 240, 232, 0.93);
-  border-bottom: 1px solid rgba(216, 210, 200, 0.75);
+  background: color-mix(in srgb, var(--bg) 93%, transparent);
+  border-bottom: 1px solid var(--border);
   backdrop-filter: blur(14px);
 }
 
@@ -185,7 +199,7 @@ body {
 }
 
 .menu-button:hover:not(:disabled) {
-  background: rgba(32, 32, 32, 0.045);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .menu-button span {
@@ -475,6 +489,11 @@ h1 {
   font-weight: 750;
   line-height: 1.03;
   letter-spacing: -0.04em;
+}
+
+h2,
+h3 {
+  color: var(--text);
 }
 
 h2 {
@@ -767,7 +786,7 @@ h2 {
   justify-content: space-between;
   gap: 18px;
   min-height: 48px;
-  border-bottom: 1px solid rgba(216, 210, 200, 0.7);
+  border-bottom: 1px solid var(--border);
 }
 
 .summary-list > div:last-child {
@@ -1132,7 +1151,7 @@ h2 {
 }
 
 .history-card-main:hover:not(:disabled) {
-  background: rgba(32, 32, 32, 0.015);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 
 .history-card-top {
@@ -1218,11 +1237,11 @@ h2 {
   display: grid;
   gap: 4px;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(216, 210, 200, 0.55);
+  border-bottom: 1px solid var(--border);
 }
 
 .history-details > div:nth-child(odd) {
-  border-right: 1px solid rgba(216, 210, 200, 0.55);
+  border-right: 1px solid var(--border);
 }
 
 .history-details span {
@@ -1315,7 +1334,7 @@ select {
 
 input:hover,
 select:hover {
-  border-color: #c8c0b5;
+  border-color: var(--border-strong);
 }
 
 input:focus,
@@ -1357,10 +1376,10 @@ button {
   width: 100%;
   min-height: 50px;
   padding: 0 18px;
-  border: 1px solid var(--text);
+  border: 1px solid var(--btn-bg);
   border-radius: var(--radius-md);
-  background: var(--text);
-  color: var(--on-text);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
   font: inherit;
   font-size: 14px;
   font-weight: 700;
@@ -1378,11 +1397,9 @@ button {
 }
 
 button:hover:not(:disabled) {
-  /* Mistura com --bg em vez de um tom fixo: o botão padrão é preenchido
-     com --text, que inverte entre os temas (quase-preto no claro,
-     quase-branco no escuro) — um hover fixo do lado errado apagava o
-     contraste no escuro. */
-  background: color-mix(in srgb, var(--text) 85%, var(--bg) 15%);
+  /* Mistura com --bg em vez de um tom fixo — funciona nos dois temas
+     (grafite no claro, âmbar no escuro). */
+  background: color-mix(in srgb, var(--btn-bg) 85%, var(--bg) 15%);
 }
 
 button:active:not(:disabled) {
@@ -1411,7 +1428,7 @@ button.secondary:hover:not(:disabled) {
 }
 
 .work-button {
-  background: var(--text);
+  background: var(--btn-bg);
 }
 
 .login-signup-prompt {
