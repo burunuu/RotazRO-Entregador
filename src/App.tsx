@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Capacitor } from '@capacitor/core'
+import { App as CapacitorApp } from '@capacitor/app'
 import { Geolocation } from '@capacitor/geolocation'
 import { BackgroundGeolocation } from '@capgo/background-geolocation'
 import { supabase } from './lib/supabase'
@@ -479,6 +480,76 @@ function App() {
   }, [authenticated, driverProfileId])
 
   // =========================================================
+  // BOTÃO FÍSICO/GESTO "VOLTAR" (ANDROID)
+  // =========================================================
+  // Registrar este listener desativa o comportamento nativo padrão (que,
+  // sem nenhum listener, tende a fechar o app na hora — este é um app de
+  // tela única controlada por estado React, não por navegação de
+  // histórico do WebView, então "canGoBack" do evento nunca ajuda aqui).
+  // Prioridade: menu > popup bloqueando rota ativa > popup de rota
+  // atribuída > sub-modal da tela atual (hoje só "Minha rota" tem um,
+  // via myRouteBackHandlerRef) > voltar pra Home > sair do app.
+  //
+  // A oferta de entrega (deliveryOffers.offer) É DE PROPÓSITO deixada de
+  // fora dessa cadeia: é uma decisão com prazo (aceitar/recusar), sem botão
+  // de fechar hoje — Back "fechar" isso silenciosamente equivaleria a uma
+  // recusa implícita que o backend nunca veria, então o gesto simplesmente
+  // não faz nada enquanto ela estiver na tela.
+  const myRouteBackHandlerRef = useRef<(() => boolean) | null>(null)
+  const backButtonState = useRef({
+    menuOpen,
+    view,
+    activeRouteBlockedOpen,
+    hasOffer: deliveryOffers.offer !== null,
+    showAssignedPopup: assignedRoute.showPopup,
+    dismissAssignedPopup: assignedRoute.dismissPopup,
+  })
+  backButtonState.current = {
+    menuOpen,
+    view,
+    activeRouteBlockedOpen,
+    hasOffer: deliveryOffers.offer !== null,
+    showAssignedPopup: assignedRoute.showPopup,
+    dismissAssignedPopup: assignedRoute.dismissPopup,
+  }
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+
+    const subscriptionPromise = CapacitorApp.addListener('backButton', () => {
+      const s = backButtonState.current
+      if (s.menuOpen) {
+        setMenuOpen(false)
+        return
+      }
+      if (s.activeRouteBlockedOpen) {
+        setActiveRouteBlockedOpen(false)
+        return
+      }
+      if (s.showAssignedPopup) {
+        s.dismissAssignedPopup()
+        return
+      }
+      if (s.hasOffer) {
+        return
+      }
+      if (s.view === 'route' && myRouteBackHandlerRef.current?.()) {
+        return
+      }
+      if (s.view !== 'home') {
+        setView('home')
+        setMenuOpen(false)
+        return
+      }
+      void CapacitorApp.exitApp()
+    })
+
+    return () => {
+      void subscriptionPromise.then((sub) => sub.remove())
+    }
+  }, [])
+
+  // =========================================================
   // SINCRONIZAÇÃO
   // =========================================================
 
@@ -851,7 +922,13 @@ function App() {
   // HISTÓRICO
   // =========================================================
 
-  async function loadHistory(driverId: string) {
+  // Sem filtro por driver_id: um entregador "regional" (driver_profiles) não
+  // tem o mesmo id da linha de roster (drivers.id) que routes.driver_id
+  // guarda — filtrar por driver.id aqui sempre dava zero linhas para esse
+  // caso (inclusive entregador externo). A política RLS "driver reads own
+  // assigned route" (driver_owns_route) já restringe exatamente às rotas do
+  // usuário autenticado, então ela é a única fonte de verdade do escopo.
+  async function loadHistory() {
     try {
       setHistoryLoading(true)
       setHistoryError(null)
@@ -862,7 +939,6 @@ function App() {
           .select(
             'id, organization_id, status, total_distance_m, actual_distance_m, estimated_duration_s, started_at, completed_at, created_at',
           )
-          .eq('driver_id', driverId)
           .order('created_at', { ascending: false })
           .limit(100)
 
@@ -1063,15 +1139,19 @@ function App() {
       if (cancelled) return
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
-        if (!cancelled) void loadHistory(driverId)
+        if (!cancelled) void loadHistory()
       }, 300)
     }
 
+    // Sem filtro (mesmo motivo de loadHistory: driver.id não é
+    // necessariamente drivers.id para um entregador regional) — a RLS já
+    // só entrega ao socket os eventos de rotas que este usuário pode ver,
+    // igual ao padrão já usado em useDeliveryOffers.
     const channel = supabase
       .channel(`history-${driverId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'routes', filter: `driver_id=eq.${driverId}` },
+        { event: '*', schema: 'public', table: 'routes' },
         scheduleReload,
       )
       .subscribe()
@@ -1105,15 +1185,12 @@ function App() {
         }
 
         if (session) {
-          const loadedDriver =
-            await loadDriver()
+          await loadDriver()
 
           if (mounted) {
             setAuthenticated(true)
 
-            void loadHistory(
-              loadedDriver.id,
-            )
+            void loadHistory()
           }
         }
       } catch (error) {
@@ -1167,15 +1244,12 @@ function App() {
         throw error
       }
 
-      const loadedDriver =
-        await loadDriver()
+      await loadDriver()
 
       setAuthenticated(true)
       setPassword('')
 
-      void loadHistory(
-        loadedDriver.id,
-      )
+      void loadHistory()
     } catch (error) {
       await supabase.auth.signOut()
 
@@ -1863,9 +1937,7 @@ function App() {
       nextView === 'history' &&
       driver
     ) {
-      void loadHistory(
-        driver.id,
-      )
+      void loadHistory()
     }
   }
 
@@ -1881,9 +1953,9 @@ function App() {
         onDone={() => {
           setAuthConfirmLink(null)
           void loadDriver()
-            .then((loadedDriver) => {
+            .then(() => {
               setAuthenticated(true)
-              void loadHistory(loadedDriver.id)
+              void loadHistory()
             })
             .catch(() => {
               // Sem sessão de verdade (ex.: link já expirado e a pessoa só
@@ -1915,9 +1987,9 @@ function App() {
         onSignedUp={() => {
           setAuthMode('login')
           void (async () => {
-            const loadedDriver = await loadDriver()
+            await loadDriver()
             setAuthenticated(true)
-            void loadHistory(loadedDriver.id)
+            void loadHistory()
           })()
         }}
         onCancel={() => setAuthMode('login')}
@@ -3233,7 +3305,14 @@ function App() {
           {view === 'history' &&
             historyView}
 
-          {view === 'route' && <MyRouteScreen onFinished={() => navigate('home')} />}
+          {view === 'route' && (
+            <MyRouteScreen
+              onFinished={() => navigate('home')}
+              registerBackHandler={(handler) => {
+                myRouteBackHandlerRef.current = handler
+              }}
+            />
+          )}
 
           {view === 'restaurants' &&
             (driverProfileId ? (

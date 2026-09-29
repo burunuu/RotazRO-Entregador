@@ -221,7 +221,16 @@ export function onNotificationOpened(handler: (payload: PushOpenedPayload) => vo
     handler(payload)
   }
   const localHandler = makeHandler('received')
-  const actionHandler = (action: ActionPerformed) => makeHandler('opened')(action.notification)
+  const actionHandler = (action: ActionPerformed) => {
+    // Só a notificação TOCADA some da bandeja — nunca as outras que possam
+    // estar lá (ex.: outra oferta ainda pendente de outro toque). Best
+    // effort: se a remoção falhar, o app já abriu e buscou o estado real
+    // normalmente, só a notificação ficaria "pendurada" na bandeja.
+    void PushNotifications.removeDeliveredNotifications({
+      notifications: [action.notification],
+    }).catch((err) => captureError(err, { event: 'push.clear_notification_failed' }))
+    makeHandler('opened')(action.notification)
+  }
 
   const localSub = PushNotifications.addListener('pushNotificationReceived', localHandler)
   const actionSub = PushNotifications.addListener('pushNotificationActionPerformed', actionHandler)
