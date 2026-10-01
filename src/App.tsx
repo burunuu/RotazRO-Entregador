@@ -295,6 +295,9 @@ function App() {
 
   const [profileMessage, setProfileMessage] =
     useState<string | null>(null)
+  // BUG 8: a mensagem ficava na tela indefinidamente -- some sozinha após
+  // 10s (ou na hora, ao sair de "Meu perfil"), sem precisar de outro toque.
+  const [profileMessageVisible, showProfileMessage, hideProfileMessage] = useTransientFlag(10_000)
 
   const [profileError, setProfileError] =
     useState<string | null>(null)
@@ -1220,6 +1223,7 @@ function App() {
       setProfileMessage(
         'Perfil atualizado. As alterações também ficam disponíveis para o restaurante.',
       )
+      showProfileMessage()
       flashProfileSaved()
     } catch (error) {
       captureError(error, { event: 'profile.save_failed' })
@@ -1794,6 +1798,13 @@ function App() {
   function navigate(
     nextView: AppView,
   ) {
+    // BUG 8: sair de "Meu perfil" esconde a confirmação na hora, em vez de
+    // deixá-la pendurada até o timer de 10s (ou reaparecer se o entregador
+    // voltar depois para essa tela).
+    if (view === 'profile' && nextView !== 'profile') {
+      hideProfileMessage()
+    }
+
     setView(nextView)
     setMenuOpen(false)
 
@@ -2503,7 +2514,7 @@ function App() {
         </p>
       </section>
 
-      {profileMessage && (
+      {profileMessage && profileMessageVisible && (
         <div className="success-message">
           {profileMessage}
         </div>
