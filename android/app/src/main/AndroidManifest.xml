@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!-- Standard AOSP battery-optimization exemption dialog (API 23+), not a
+         manufacturer-specific permission, required to launch
+         ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS from MainActivity. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Push notifications (FCM) — obrigatória a partir do Android 13
          (API 33) para o diálogo de permissão em runtime funcionar; sem
          esta declaração, PushNotifications.requestPermissions() falha
