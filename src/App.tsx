@@ -1574,6 +1574,15 @@ function App() {
           minIntervalMs:
             LOCATION_SYNC_INTERVAL_MS,
 
+          // BUG 3 root cause: the watcher only ever requested GPS_PROVIDER
+          // (raw Android location, not FusedLocationProviderClient) and the
+          // plugin's own code skips requesting NETWORK_PROVIDER as a
+          // fallback unless this is set — confirmed on a real device: GPS
+          // produced exactly one fix, then went silent indefinitely, with
+          // no recovery path. Emulators (BlueStacks) never hit this since
+          // their location is injected, not read from real GPS hardware.
+          networkFallback: true,
+
           url: locationIngestUrl,
           headers: locationIngestHeaders,
         },
