@@ -3171,7 +3171,14 @@ function App() {
 
           {view === 'route' && (
             <MyRouteScreen
-              onFinished={() => navigate('home')}
+              onFinished={() => {
+                // BUG 4: "Seu desempenho" na Home é derivado de `history`, que só
+                // era recarregado ao entrar em "Meu histórico" -- sem isso, os
+                // números ficavam presos no estado anterior à rota recém-concluída
+                // até o entregador visitar aquela tela manualmente.
+                void loadHistory()
+                navigate('home')
+              }}
               registerBackHandler={(handler) => {
                 myRouteBackHandlerRef.current = handler
               }}
