@@ -4,9 +4,10 @@ import { Capacitor } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Geolocation } from '@capacitor/geolocation'
 import { BackgroundGeolocation } from '@capgo/background-geolocation'
-import { supabase } from './lib/supabase'
+import { supabase, supabaseUrl } from './lib/supabase'
 import { ensureDriverProfile } from './services/driver-identity'
 import { updateMyPresence } from './services/presence'
+import { issueMyDriverLocationToken, revokeMyDriverLocationToken } from './services/location-token'
 import { registerForPush, onNotificationOpened, unregisterPush } from './services/notifications'
 import { useDeliveryOffers } from './hooks/useDeliveryOffers'
 import { useAssignedRoute } from './hooks/useAssignedRoute'
@@ -1543,6 +1544,21 @@ function App() {
         'Iniciando trabalho...',
       )
 
+      // BUG 3: a native POST (doesn't depend on the WebView staying
+      // responsive) alongside the JS callback below — best-effort: if
+      // issuing the token fails, tracking still starts with JS-only
+      // delivery, exactly the previous behavior, rather than blocking
+      // "Iniciar trabalho" over this.
+      let locationIngestUrl: string | undefined
+      let locationIngestHeaders: Record<string, string> | undefined
+      try {
+        const { token } = await issueMyDriverLocationToken()
+        locationIngestUrl = `${supabaseUrl}/functions/v1/driver-location-ingest`
+        locationIngestHeaders = { Authorization: `Bearer ${token}` }
+      } catch (error) {
+        captureError(error, { event: 'gps.location_token_issue_failed' })
+      }
+
       await BackgroundGeolocation.start(
         {
           backgroundTitle:
@@ -1557,6 +1573,9 @@ function App() {
 
           minIntervalMs:
             LOCATION_SYNC_INTERVAL_MS,
+
+          url: locationIngestUrl,
+          headers: locationIngestHeaders,
         },
 
         (position, error) => {
@@ -1664,6 +1683,12 @@ function App() {
         Capacitor.isNativePlatform()
       ) {
         await BackgroundGeolocation.stop()
+        // BUG 3: defense in depth alongside stopping the native service
+        // itself — revokes the location token so it can't keep working
+        // even if something kept POSTing after this. Never blocks
+        // encerrar trabalho (see revokeMyDriverLocationToken's own
+        // comment).
+        void revokeMyDriverLocationToken()
       }
 
       backgroundTrackingStarted.current =
