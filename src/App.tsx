@@ -349,17 +349,31 @@ function App() {
   // DESPACHO REGIONAL
   // =========================================================
   // Chamado incondicionalmente (regra dos hooks) mesmo antes do login —
-  // fica inerte (enabled=false) enquanto não há sessão/tracking. Gated por
-  // `tracking` (não só `authenticated`) porque dispatch_route_regional só
-  // considera drivers com driver_presence.status='online', que só é
-  // setado ao iniciar o trabalho (ver sendLocationToSupabase) — não faria
-  // sentido fazer polling de oferta antes disso, nunca haveria nada.
-  const deliveryOffers = useDeliveryOffers(authenticated && tracking)
+  // fica inerte (enabled=false) enquanto não há sessão.
+  //
+  // BUG 1B: isto era gated por `tracking` também (não só `authenticated`),
+  // com a lógica de que dispatch_route_regional só considera drivers com
+  // driver_presence.status='online', setado ao iniciar o trabalho -- então
+  // não haveria oferta pra buscar antes disso. O raciocínio era válido para
+  // dentro da MESMA sessão do app, mas `tracking` é estado React puro:
+  // reseta pra `false` em todo cold start (app morto e reaberto, exatamente
+  // o caso de tocar numa notificação com o app fechado), mesmo que o
+  // entregador já estivesse online/em turno quando a oferta foi criada.
+  // Resultado real: push chega, usuário toca, app abre com tracking=false,
+  // este hook fica desabilitado, a oferta nunca é buscada -- parece "abriu
+  // e fechou". A busca em si é leve (poll de 5s + realtime); não depende de
+  // tracking estar true.
+  const deliveryOffers = useDeliveryOffers(authenticated)
 
   // Detecção de rota atribuída diretamente pelo restaurante ("entregador
   // da loja") ou já aceita via oferta regional — independente de
   // `tracking`, porque a atribuição não depende de presence/GPS.
   const assignedRoute = useAssignedRoute(authenticated)
+
+  // BUG 1B: tocar numa notificação de oferta já expirada (prazo de oferta é
+  // curto, ~30s) não dava nenhum retorno -- só um log silencioso. Mostra um
+  // aviso breve em vez de simplesmente "não acontecer nada" na tela.
+  const [offerExpiredNoticeVisible, showOfferExpiredNotice] = useTransientFlag(6000)
 
   useEffect(() => {
     if (!authenticated || !driverProfileId) return
@@ -377,6 +391,7 @@ function App() {
         void deliveryOffers.refetch().then((found) => {
           if (payload.source === 'opened' && !found) {
             logger.info('push.offer_stale_on_open', { offer_id: payload.offerId })
+            showOfferExpiredNotice()
           }
         })
       } else if (payload.type === 'route_assigned') {
@@ -3203,6 +3218,12 @@ function App() {
 
       <section className="app-container">
         {header}
+
+        {offerExpiredNoticeVisible && (
+          <div className="error" role="status">
+            Essa oferta não está mais disponível. Ela pode ter expirado ou sido atendida por outro entregador.
+          </div>
+        )}
 
         <div className="app-content">
           {view === 'home' &&
