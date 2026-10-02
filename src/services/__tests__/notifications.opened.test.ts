@@ -17,6 +17,7 @@ vi.mock('@capacitor/core', () => ({
 type Listener = (arg: unknown) => void
 let listeners: Record<string, Listener>
 const removeDeliveredMock = vi.fn(async (_delivered: unknown) => undefined)
+const getDeliveredMock = vi.fn(async () => ({ notifications: [] as unknown[] }))
 
 vi.mock('@capacitor/push-notifications', () => ({
   PushNotifications: {
@@ -24,6 +25,7 @@ vi.mock('@capacitor/push-notifications', () => ({
       listeners[event] = handler
       return Promise.resolve({ remove: vi.fn() })
     }),
+    getDeliveredNotifications: getDeliveredMock,
     removeDeliveredNotifications: removeDeliveredMock,
   },
 }))
@@ -37,20 +39,48 @@ async function loadModule() {
   vi.resetModules()
   listeners = {}
   removeDeliveredMock.mockClear()
+  getDeliveredMock.mockClear()
   return import('../notifications')
 }
 
 describe('onNotificationOpened', () => {
-  it('clears only the tapped notification from the tray (tap = pushNotificationActionPerformed)', async () => {
+  it('clears only the tapped notification from the tray, looked up by data (never the raw tap-event id)', async () => {
+    // The tap event's own `notification.id` is the Android system's composite
+    // key (e.g. "0:...%..."), not the plain int this plugin's native
+    // removeDeliveredNotifications expects -- passing it straight through
+    // crashes the whole app (BUG 1B, proven via physical-device logcat). The
+    // fix looks the tapped notification up in getDeliveredNotifications() by
+    // the data payload we control (route_id/offer_id) and removes THAT
+    // properly-shaped entry (real int id) instead.
+    const deliveredEntry = { id: 7, tag: 'FCM-Notification:123', data: { type: 'route_assigned', route_id: 'r-1' } }
+    getDeliveredMock.mockResolvedValue({
+      notifications: [{ id: 1, data: { type: 'offer_created', offer_id: 'o-unrelated' } }, deliveredEntry],
+    })
+
     const { onNotificationOpened } = await loadModule()
     const handler = vi.fn()
     onNotificationOpened(handler)
 
-    const notification = { id: 'n-42', data: { type: 'route_assigned', route_id: 'r-1' } }
-    listeners['pushNotificationActionPerformed']({ actionId: 'tap', notification })
+    const tapped = { id: '0:1790907903218435%2fb5981d2fb5981d', data: { type: 'route_assigned', route_id: 'r-1' } }
+    listeners['pushNotificationActionPerformed']({ actionId: 'tap', notification: tapped })
+    await vi.waitFor(() => expect(removeDeliveredMock).toHaveBeenCalledTimes(1))
 
-    expect(removeDeliveredMock).toHaveBeenCalledTimes(1)
-    expect(removeDeliveredMock).toHaveBeenCalledWith({ notifications: [notification] })
+    expect(removeDeliveredMock).toHaveBeenCalledWith({ notifications: [deliveredEntry] })
+    expect(handler).toHaveBeenCalledWith({ type: 'route_assigned', routeId: 'r-1', source: 'opened' })
+  })
+
+  it('does not call removeDeliveredNotifications when no matching delivered entry is found', async () => {
+    getDeliveredMock.mockResolvedValue({ notifications: [] })
+
+    const { onNotificationOpened } = await loadModule()
+    const handler = vi.fn()
+    onNotificationOpened(handler)
+
+    const tapped = { id: '0:1790907903218435%2fb5981d2fb5981d', data: { type: 'route_assigned', route_id: 'r-1' } }
+    listeners['pushNotificationActionPerformed']({ actionId: 'tap', notification: tapped })
+    await vi.waitFor(() => expect(getDeliveredMock).toHaveBeenCalledTimes(1))
+
+    expect(removeDeliveredMock).not.toHaveBeenCalled()
     expect(handler).toHaveBeenCalledWith({ type: 'route_assigned', routeId: 'r-1', source: 'opened' })
   })
 
