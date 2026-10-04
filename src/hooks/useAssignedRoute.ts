@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchMyActiveRoute, nextPendingStop, type MyRoute } from '../services/routes'
+import { wasRouteAcceptedViaOffer } from '../services/dispatch'
 import { captureError } from '../lib/observability/capture'
 
 /**
@@ -20,6 +21,28 @@ import { captureError } from '../lib/observability/capture'
  * (mesmo padrão de useDeliveryOffers).
  */
 const POLL_MS = 7000
+
+/**
+ * O aviso "Nova rota atribuída" é só para rota atribuída diretamente pelo
+ * restaurante (entregador da loja). Quem aceita uma oferta regional/externo
+ * acabou de decidir e já é levado à tela da rota — avisar de novo seria
+ * ruído (e aparecia quando o polling pegava a rota recém-aceita).
+ *  - 'announce': atribuição direta → mostrar o aviso
+ *  - 'silent':   veio de oferta aceita → não mostrar
+ *  - 'retry':    não deu pra saber a origem → não marcar como vista, o
+ *                próximo tick decide (nunca avisa nem suprime no escuro)
+ */
+export async function classifyNewActiveRoute(
+  routeId: string,
+  acceptedViaOffer: (routeId: string) => Promise<boolean> = wasRouteAcceptedViaOffer,
+): Promise<'announce' | 'silent' | 'retry'> {
+  try {
+    return (await acceptedViaOffer(routeId)) ? 'silent' : 'announce'
+  } catch (err) {
+    captureError(err, { event: 'route.assigned_route_origin_lookup_failed' })
+    return 'retry'
+  }
+}
 
 export function useAssignedRoute(enabled: boolean) {
   const [route, setRoute] = useState<MyRoute | null>(null)
@@ -52,8 +75,12 @@ export function useAssignedRoute(enabled: boolean) {
 
         const active = next && (next.status === 'confirmed' || next.status === 'in_progress')
         if (active && !seenRouteIds.current.has(next.id)) {
-          seenRouteIds.current.add(next.id)
-          setJustAssignedRouteId(next.id)
+          const decision = await classifyNewActiveRoute(next.id)
+          if (cancelled) return false
+          if (decision !== 'retry') {
+            seenRouteIds.current.add(next.id)
+            if (decision === 'announce') setJustAssignedRouteId(next.id)
+          }
         }
         return active === true
       } catch (err) {
