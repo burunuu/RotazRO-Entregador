@@ -37,3 +37,7 @@ android/app/google-services.json
 *.njsproj
 *.sln
 *.sw?
+
+# Local build artifacts (APKs) and local Claude Code config — never commit these
+builds/
+.claude/
