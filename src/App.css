@@ -1471,6 +1471,15 @@ button.secondary:hover:not(:disabled) {
   background: var(--btn-bg);
 }
 
+.app-version {
+  margin: 16px 0 24px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
 .login-signup-prompt {
   margin: 32px 0 0;
   text-align: center;

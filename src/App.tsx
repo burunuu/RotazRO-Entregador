@@ -13,6 +13,7 @@ import { useDeliveryOffers } from './hooks/useDeliveryOffers'
 import { useAssignedRoute } from './hooks/useAssignedRoute'
 import { DeliveryOfferModal } from './components/DeliveryOfferModal'
 import { AssignedRouteModal } from './components/AssignedRouteModal'
+import { AppVersionLabel } from './components/AppVersionLabel'
 import { AssignedRouteCard } from './components/AssignedRouteCard'
 import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
@@ -1997,6 +1998,7 @@ function App() {
             </button>
           </p>
         </section>
+        <AppVersionLabel />
       </main>
     )
   }
