@@ -207,6 +207,45 @@ export function parseOpenedPayload(notification: PushNotificationSchema, source:
   return { type: 'unknown', source }
 }
 
+/**
+ * Remover a notificação tocada da bandeja passando `action.notification`
+ * direto para `removeDeliveredNotifications` crasha o app inteiro: esse
+ * objeto vem do evento `pushNotificationActionPerformed`, cujo `id` é a
+ * chave composta do sistema Android (ex.: "0:1790907903218435%2fb5981d2fb5981d"),
+ * não um inteiro. O código nativo do plugin (PushNotificationsPlugin.java,
+ * removeDeliveredNotifications) faz `Integer id = notif.getInteger("id")` e
+ * depois `notificationManager.cancel(id)` — como "id" não é parseável como
+ * inteiro, getInteger() retorna null, e o auto-unboxing do cancel(int) lança
+ * NullPointerException numa HandlerThread nativa, fora do alcance de
+ * qualquer try/catch em JS — matando o processo (comprovado via logcat em
+ * dispositivo físico, 2026-10-02; BUG 1B).
+ *
+ * O único formato de "id" que esse plugin de fato sabe remover é o que ele
+ * mesmo produz em getDeliveredNotifications() (StatusBarNotification.getId(),
+ * um inteiro real). Por isso: buscar a notificação tocada nessa lista pelo
+ * payload de dados que nós mesmos controlamos (offer_id/route_id) e remover
+ * SÓ essa entrada — nunca o objeto bruto do evento de toque, nunca todas.
+ */
+async function clearDeliveredNotificationSafely(tapped: PushNotificationSchema): Promise<void> {
+  const tappedData = tapped.data as Record<string, unknown> | undefined
+  const matchKey =
+    typeof tappedData?.['offer_id'] === 'string'
+      ? 'offer_id'
+      : typeof tappedData?.['route_id'] === 'string'
+        ? 'route_id'
+        : null
+  if (!matchKey) return
+
+  const { notifications } = await PushNotifications.getDeliveredNotifications()
+  const match = notifications.find((n) => {
+    const data = n.data as Record<string, unknown> | undefined
+    return data?.[matchKey] === tappedData![matchKey]
+  })
+  if (!match) return
+
+  await PushNotifications.removeDeliveredNotifications({ notifications: [match] })
+}
+
 /** Assina o evento de toque/recebimento de notificação — ver PushOpenedPayload.
  * `source: 'opened'` (usuário tocou a notificação, ActionPerformed) é
  * distinto de `'received'` (chegou com o app já em primeiro plano) — só o
@@ -221,7 +260,16 @@ export function onNotificationOpened(handler: (payload: PushOpenedPayload) => vo
     handler(payload)
   }
   const localHandler = makeHandler('received')
-  const actionHandler = (action: ActionPerformed) => makeHandler('opened')(action.notification)
+  const actionHandler = (action: ActionPerformed) => {
+    // Só a notificação TOCADA some da bandeja — nunca as outras que possam
+    // estar lá (ex.: outra oferta ainda pendente de outro toque). Best
+    // effort: se a remoção falhar, o app já abriu e buscou o estado real
+    // normalmente, só a notificação ficaria "pendurada" na bandeja.
+    void clearDeliveredNotificationSafely(action.notification).catch((err) =>
+      captureError(err, { event: 'push.clear_notification_failed' }),
+    )
+    makeHandler('opened')(action.notification)
+  }
 
   const localSub = PushNotifications.addListener('pushNotificationReceived', localHandler)
   const actionSub = PushNotifications.addListener('pushNotificationActionPerformed', actionHandler)

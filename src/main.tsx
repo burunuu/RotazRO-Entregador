@@ -7,6 +7,10 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { captureError } from './lib/observability/capture'
+import { initTheme } from './lib/theme-runtime'
+
+// Tema (Claro/Escuro/Sistema) aplicado no boot, independente de qualquer tela.
+initTheme()
 
 // Sentry's own GlobalHandlers integration already listens for
 // window.onerror/unhandledrejection when Sentry is configured — these

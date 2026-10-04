@@ -186,7 +186,7 @@ export function DeliveryOfferModal({ offer, busy, error, onAccept, onDecline }: 
         {error && <div className="error">{error}</div>}
 
         <div className="offer-swipe-row">
-          <button type="button" className="offer-decline-button" onClick={onDecline} disabled={busy}>
+          <button type="button" className="offer-decline-button" onClick={onDecline} disabled={busy} aria-busy={busy}>
             Recusar
           </button>
 
@@ -219,6 +219,7 @@ export function DeliveryOfferModal({ offer, busy, error, onAccept, onDecline }: 
           type="button"
           className="secondary offer-accept-fallback"
           disabled={busy}
+          aria-busy={busy}
           onClick={() => {
             if (window.confirm('Aceitar esta entrega?')) onAccept()
           }}

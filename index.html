@@ -4,22 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>rotazro-entregador</title>
+    <title>RotazRO</title>
     <script>
-      // Antes do primeiro paint, evita flash de tema claro ao abrir com
-      // "escuro" ou "sistema" salvos — deve ficar em sincronia com
-      // src/lib/theme.ts.
-      (function () {
-        try {
-          var stored = localStorage.getItem('rotazro-theme')
-          var dark =
-            stored === 'dark' ||
-            (stored !== 'light' &&
-              window.matchMedia &&
-              window.matchMedia('(prefers-color-scheme: dark)').matches)
-          if (dark) document.documentElement.classList.add('dark')
-        } catch (e) {}
-      })()
+      // Antes da primeira pintura: evita piscar claro quando o app abre em escuro.
+      // Mesma regra de src/lib/theme.ts (a preferência "system" acompanha o Android).
+      try {
+        var p = localStorage.getItem('rotazro-theme')
+        var dark =
+          p === 'dark' ||
+          (p !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+      } catch (e) {}
     </script>
   </head>
   <body>

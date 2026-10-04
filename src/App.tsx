@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Capacitor } from '@capacitor/core'
+import { App as CapacitorApp } from '@capacitor/app'
 import { Geolocation } from '@capacitor/geolocation'
 import { BackgroundGeolocation } from '@capgo/background-geolocation'
-import { supabase } from './lib/supabase'
+import { supabase, supabaseUrl } from './lib/supabase'
 import { ensureDriverProfile } from './services/driver-identity'
 import { updateMyPresence } from './services/presence'
+import { issueMyDriverLocationToken, revokeMyDriverLocationToken } from './services/location-token'
 import { registerForPush, onNotificationOpened, unregisterPush } from './services/notifications'
 import { useDeliveryOffers } from './hooks/useDeliveryOffers'
 import { useAssignedRoute } from './hooks/useAssignedRoute'
 import { DeliveryOfferModal } from './components/DeliveryOfferModal'
 import { AssignedRouteModal } from './components/AssignedRouteModal'
+import { AppVersionLabel } from './components/AppVersionLabel'
 import { AssignedRouteCard } from './components/AssignedRouteCard'
 import { ActiveRouteBlockedModal } from './components/ActiveRouteBlockedModal'
 import { MyRouteScreen } from './screens/MyRouteScreen'
@@ -19,12 +22,21 @@ import { CompleteProfileScreen } from './screens/CompleteProfileScreen'
 import { AuthConfirmScreen } from './screens/AuthConfirmScreen'
 import { MyRestaurantsScreen } from './screens/MyRestaurantsScreen'
 import { ThemeSelector } from './components/ThemeSelector'
-import { House, CircleUser, History, Store, Route as RouteIcon } from 'lucide-react'
+import { House, History, Store, ChevronRight, Route as RouteIcon } from 'lucide-react'
+import { weatherIcon, freshWeatherReading, type WeatherReading } from './lib/weather'
+import { useTransientFlag } from './lib/transient-flag'
 import { fetchMyActiveRoute, resolveRouteShareToken } from './services/routes'
 import { registerDeepLinkListener, type DeepLinkPayload } from './services/deep-links'
 import { formatDuration, formatBrazilPhone, formatCpf, routeStatusLabel } from './lib/format'
 import { captureError } from './lib/observability/capture'
 import { logger } from './lib/observability/logger'
+import {
+  computeHistoryMetrics,
+  getRouteDistance,
+  getRouteDuration,
+  type RouteHistoryItem,
+  type RouteRow,
+} from './lib/history-metrics'
 import './App.css'
 
 const LOCATION_SYNC_INTERVAL_MS = 8000
@@ -87,42 +99,6 @@ type BackgroundPosition = {
   speed: number | null
   bearing: number | null
   time: number | null
-}
-
-type RouteRow = {
-  id: string
-  organization_id: string
-  status: string
-  total_distance_m: number | null
-  actual_distance_m: number | null
-  estimated_duration_s: number | null
-  started_at: string | null
-  completed_at: string | null
-  created_at: string
-}
-
-type RouteHistoryItem = RouteRow & {
-  organization_name: string
-  deliveries: number
-  amount_cents: number | null
-}
-
-type HistoryMetrics = {
-  routes: number
-  deliveries: number
-  distanceMeters: number
-  durationSeconds: number
-  amountCents: number
-  restaurants: number
-}
-
-const EMPTY_METRICS: HistoryMetrics = {
-  routes: 0,
-  deliveries: 0,
-  distanceMeters: 0,
-  durationSeconds: 0,
-  amountCents: 0,
-  restaurants: 0,
 }
 
 // =========================================================
@@ -192,70 +168,6 @@ function formatMoney(cents: number | null) {
     style: 'currency',
     currency: 'BRL',
   }).format(cents / 100)
-}
-
-function getRouteDate(route: RouteHistoryItem) {
-  return new Date(
-    route.completed_at ??
-      route.started_at ??
-      route.created_at,
-  )
-}
-
-function getRouteDuration(route: RouteHistoryItem) {
-  if (route.started_at && route.completed_at) {
-    const start = new Date(route.started_at).getTime()
-    const end = new Date(route.completed_at).getTime()
-
-    if (
-      Number.isFinite(start) &&
-      Number.isFinite(end) &&
-      end > start
-    ) {
-      return Math.round((end - start) / 1000)
-    }
-  }
-
-  return route.estimated_duration_s ?? 0
-}
-
-function getRouteDistance(route: RouteHistoryItem) {
-  return route.actual_distance_m ?? route.total_distance_m ?? 0
-}
-
-function calculateMetrics(
-  routes: RouteHistoryItem[],
-): HistoryMetrics {
-  if (routes.length === 0) {
-    return EMPTY_METRICS
-  }
-
-  const restaurants = new Set<string>()
-
-  let deliveries = 0
-  let distanceMeters = 0
-  let durationSeconds = 0
-  let amountCents = 0
-
-  for (const route of routes) {
-    deliveries += route.deliveries
-    distanceMeters += getRouteDistance(route)
-    durationSeconds += getRouteDuration(route)
-    amountCents += route.amount_cents ?? 0
-
-    if (route.organization_id) {
-      restaurants.add(route.organization_id)
-    }
-  }
-
-  return {
-    routes: routes.length,
-    deliveries,
-    distanceMeters,
-    durationSeconds,
-    amountCents,
-    restaurants: restaurants.size,
-  }
 }
 
 function App() {
@@ -352,9 +264,7 @@ function App() {
     new Date(),
   )
 
-  const [temperature, setTemperature] = useState<
-    number | null
-  >(null)
+  const [weather, setWeather] = useState<WeatherReading | null>(null)
 
   const [weatherLoading, setWeatherLoading] =
     useState(false)
@@ -380,9 +290,16 @@ function App() {
     useState('')
 
   const [profileSaving, setProfileSaving] = useState(false)
+  // "Salvo ✓" no próprio botão por ~1,8 s; o ref bloqueia duplo toque mesmo antes
+  // do re-render que desabilita o botão.
+  const [profileSaved, flashProfileSaved, clearProfileSaved] = useTransientFlag()
+  const profileSavingRef = useRef(false)
 
   const [profileMessage, setProfileMessage] =
     useState<string | null>(null)
+  // BUG 8: a mensagem ficava na tela indefinidamente -- some sozinha após
+  // 10s (ou na hora, ao sair de "Meu perfil"), sem precisar de outro toque.
+  const [profileMessageVisible, showProfileMessage, hideProfileMessage] = useTransientFlag(10_000)
 
   const [profileError, setProfileError] =
     useState<string | null>(null)
@@ -433,17 +350,31 @@ function App() {
   // DESPACHO REGIONAL
   // =========================================================
   // Chamado incondicionalmente (regra dos hooks) mesmo antes do login —
-  // fica inerte (enabled=false) enquanto não há sessão/tracking. Gated por
-  // `tracking` (não só `authenticated`) porque dispatch_route_regional só
-  // considera drivers com driver_presence.status='online', que só é
-  // setado ao iniciar o trabalho (ver sendLocationToSupabase) — não faria
-  // sentido fazer polling de oferta antes disso, nunca haveria nada.
-  const deliveryOffers = useDeliveryOffers(authenticated && tracking)
+  // fica inerte (enabled=false) enquanto não há sessão.
+  //
+  // BUG 1B: isto era gated por `tracking` também (não só `authenticated`),
+  // com a lógica de que dispatch_route_regional só considera drivers com
+  // driver_presence.status='online', setado ao iniciar o trabalho -- então
+  // não haveria oferta pra buscar antes disso. O raciocínio era válido para
+  // dentro da MESMA sessão do app, mas `tracking` é estado React puro:
+  // reseta pra `false` em todo cold start (app morto e reaberto, exatamente
+  // o caso de tocar numa notificação com o app fechado), mesmo que o
+  // entregador já estivesse online/em turno quando a oferta foi criada.
+  // Resultado real: push chega, usuário toca, app abre com tracking=false,
+  // este hook fica desabilitado, a oferta nunca é buscada -- parece "abriu
+  // e fechou". A busca em si é leve (poll de 5s + realtime); não depende de
+  // tracking estar true.
+  const deliveryOffers = useDeliveryOffers(authenticated)
 
   // Detecção de rota atribuída diretamente pelo restaurante ("entregador
   // da loja") ou já aceita via oferta regional — independente de
   // `tracking`, porque a atribuição não depende de presence/GPS.
   const assignedRoute = useAssignedRoute(authenticated)
+
+  // BUG 1B: tocar numa notificação de oferta já expirada (prazo de oferta é
+  // curto, ~30s) não dava nenhum retorno -- só um log silencioso. Mostra um
+  // aviso breve em vez de simplesmente "não acontecer nada" na tela.
+  const [offerExpiredNoticeVisible, showOfferExpiredNotice] = useTransientFlag(6000)
 
   useEffect(() => {
     if (!authenticated || !driverProfileId) return
@@ -461,6 +392,7 @@ function App() {
         void deliveryOffers.refetch().then((found) => {
           if (payload.source === 'opened' && !found) {
             logger.info('push.offer_stale_on_open', { offer_id: payload.offerId })
+            showOfferExpiredNotice()
           }
         })
       } else if (payload.type === 'route_assigned') {
@@ -473,6 +405,76 @@ function App() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, driverProfileId])
+
+  // =========================================================
+  // BOTÃO FÍSICO/GESTO "VOLTAR" (ANDROID)
+  // =========================================================
+  // Registrar este listener desativa o comportamento nativo padrão (que,
+  // sem nenhum listener, tende a fechar o app na hora — este é um app de
+  // tela única controlada por estado React, não por navegação de
+  // histórico do WebView, então "canGoBack" do evento nunca ajuda aqui).
+  // Prioridade: menu > popup bloqueando rota ativa > popup de rota
+  // atribuída > sub-modal da tela atual (hoje só "Minha rota" tem um,
+  // via myRouteBackHandlerRef) > voltar pra Home > sair do app.
+  //
+  // A oferta de entrega (deliveryOffers.offer) É DE PROPÓSITO deixada de
+  // fora dessa cadeia: é uma decisão com prazo (aceitar/recusar), sem botão
+  // de fechar hoje — Back "fechar" isso silenciosamente equivaleria a uma
+  // recusa implícita que o backend nunca veria, então o gesto simplesmente
+  // não faz nada enquanto ela estiver na tela.
+  const myRouteBackHandlerRef = useRef<(() => boolean) | null>(null)
+  const backButtonState = useRef({
+    menuOpen,
+    view,
+    activeRouteBlockedOpen,
+    hasOffer: deliveryOffers.offer !== null,
+    showAssignedPopup: assignedRoute.showPopup,
+    dismissAssignedPopup: assignedRoute.dismissPopup,
+  })
+  backButtonState.current = {
+    menuOpen,
+    view,
+    activeRouteBlockedOpen,
+    hasOffer: deliveryOffers.offer !== null,
+    showAssignedPopup: assignedRoute.showPopup,
+    dismissAssignedPopup: assignedRoute.dismissPopup,
+  }
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+
+    const subscriptionPromise = CapacitorApp.addListener('backButton', () => {
+      const s = backButtonState.current
+      if (s.menuOpen) {
+        setMenuOpen(false)
+        return
+      }
+      if (s.activeRouteBlockedOpen) {
+        setActiveRouteBlockedOpen(false)
+        return
+      }
+      if (s.showAssignedPopup) {
+        s.dismissAssignedPopup()
+        return
+      }
+      if (s.hasOffer) {
+        return
+      }
+      if (s.view === 'route' && myRouteBackHandlerRef.current?.()) {
+        return
+      }
+      if (s.view !== 'home') {
+        setView('home')
+        setMenuOpen(false)
+        return
+      }
+      void CapacitorApp.exitApp()
+    })
+
+    return () => {
+      void subscriptionPromise.then((sub) => sub.remove())
+    }
+  }, [])
 
   // =========================================================
   // SINCRONIZAÇÃO
@@ -515,53 +517,10 @@ function App() {
   // MÉTRICAS
   // =========================================================
 
-  const metrics = useMemo(() => {
-    const now = new Date()
-
-    const startToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    )
-
-    const day = now.getDay()
-    const mondayOffset = day === 0 ? -6 : 1 - day
-
-    const startWeek = new Date(startToday)
-    startWeek.setDate(startToday.getDate() + mondayOffset)
-
-    const startMonth = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      1,
-    )
-
-    const completedRoutes = history.filter(
-      (route) =>
-        route.completed_at != null ||
-        route.status === 'completed',
-    )
-
-    return {
-      today: calculateMetrics(
-        completedRoutes.filter(
-          (route) => getRouteDate(route) >= startToday,
-        ),
-      ),
-
-      week: calculateMetrics(
-        completedRoutes.filter(
-          (route) => getRouteDate(route) >= startWeek,
-        ),
-      ),
-
-      month: calculateMetrics(
-        completedRoutes.filter(
-          (route) => getRouteDate(route) >= startMonth,
-        ),
-      ),
-    }
-  }, [history])
+  const metrics = useMemo(
+    () => computeHistoryMetrics(history, new Date()),
+    [history],
+  )
 
   // =========================================================
   // CLIMA
@@ -595,7 +554,7 @@ function App() {
         `https://api.open-meteo.com/v1/forecast` +
         `?latitude=${encodeURIComponent(latitude)}` +
         `&longitude=${encodeURIComponent(longitude)}` +
-        `&current=temperature_2m` +
+        `&current=temperature_2m,weather_code,is_day` +
         `&timezone=auto`
 
       const response = await fetch(url)
@@ -609,14 +568,27 @@ function App() {
       const data = (await response.json()) as {
         current?: {
           temperature_2m?: number
+          weather_code?: number
+          is_day?: number
         }
       }
 
       if (
         typeof data.current?.temperature_2m === 'number' &&
-        Number.isFinite(data.current.temperature_2m)
+        Number.isFinite(data.current.temperature_2m) &&
+        typeof data.current.weather_code === 'number'
       ) {
-        setTemperature(data.current.temperature_2m)
+        setWeather({
+          temperature: data.current.temperature_2m,
+          weatherCode: data.current.weather_code,
+          // Open-Meteo manda 1/0; sem o campo (API antiga/erro de shape),
+          // cai no horário local do aparelho — nunca assume "dia" às cegas.
+          isDay:
+            data.current.is_day != null
+              ? data.current.is_day === 1
+              : new Date().getHours() >= 6 && new Date().getHours() < 18,
+          fetchedAt: now,
+        })
 
         lastWeatherFetchAt.current = now
 
@@ -626,6 +598,8 @@ function App() {
         }
       }
     } catch (error) {
+      // Sem dado novo, o valor cacheado continua na tela até ficar velho
+      // demais (WEATHER_STALE_MS) — nunca trava a UI, nunca finge sucesso.
       console.warn('ERRO_TEMPERATURA:', error)
     } finally {
       setWeatherLoading(false)
@@ -832,7 +806,13 @@ function App() {
   // HISTÓRICO
   // =========================================================
 
-  async function loadHistory(driverId: string) {
+  // Sem filtro por driver_id: um entregador "regional" (driver_profiles) não
+  // tem o mesmo id da linha de roster (drivers.id) que routes.driver_id
+  // guarda — filtrar por driver.id aqui sempre dava zero linhas para esse
+  // caso (inclusive entregador externo). A política RLS "driver reads own
+  // assigned route" (driver_owns_route) já restringe exatamente às rotas do
+  // usuário autenticado, então ela é a única fonte de verdade do escopo.
+  async function loadHistory() {
     try {
       setHistoryLoading(true)
       setHistoryError(null)
@@ -843,7 +823,6 @@ function App() {
           .select(
             'id, organization_id, status, total_distance_m, actual_distance_m, estimated_duration_s, started_at, completed_at, created_at',
           )
-          .eq('driver_id', driverId)
           .order('created_at', { ascending: false })
           .limit(100)
 
@@ -1044,15 +1023,19 @@ function App() {
       if (cancelled) return
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
-        if (!cancelled) void loadHistory(driverId)
+        if (!cancelled) void loadHistory()
       }, 300)
     }
 
+    // Sem filtro (mesmo motivo de loadHistory: driver.id não é
+    // necessariamente drivers.id para um entregador regional) — a RLS já
+    // só entrega ao socket os eventos de rotas que este usuário pode ver,
+    // igual ao padrão já usado em useDeliveryOffers.
     const channel = supabase
       .channel(`history-${driverId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'routes', filter: `driver_id=eq.${driverId}` },
+        { event: '*', schema: 'public', table: 'routes' },
         scheduleReload,
       )
       .subscribe()
@@ -1086,15 +1069,12 @@ function App() {
         }
 
         if (session) {
-          const loadedDriver =
-            await loadDriver()
+          await loadDriver()
 
           if (mounted) {
             setAuthenticated(true)
 
-            void loadHistory(
-              loadedDriver.id,
-            )
+            void loadHistory()
           }
         }
       } catch (error) {
@@ -1148,15 +1128,12 @@ function App() {
         throw error
       }
 
-      const loadedDriver =
-        await loadDriver()
+      await loadDriver()
 
       setAuthenticated(true)
       setPassword('')
 
-      void loadHistory(
-        loadedDriver.id,
-      )
+      void loadHistory()
     } catch (error) {
       await supabase.auth.signOut()
 
@@ -1190,7 +1167,7 @@ function App() {
   ) {
     event.preventDefault()
 
-    if (!driver) return
+    if (!driver || profileSavingRef.current) return
 
     const normalizedName =
       profileName.trim()
@@ -1204,54 +1181,55 @@ function App() {
     }
 
     try {
+      profileSavingRef.current = true
       setProfileSaving(true)
+      clearProfileSaved()
       setProfileError(null)
       setProfileMessage(null)
 
-      const payload = {
-        name: normalizedName,
+      /*
+       * Salvamos já formatado para a web
+       * receber o mesmo formato.
+       */
+      const normalizedPhone = profilePhone
+        ? formatBrazilPhone(profilePhone)
+        : null
 
-        /*
-         * Salvamos já formatado para a web
-         * receber o mesmo formato.
-         */
-        phone: profilePhone
-          ? formatBrazilPhone(
-              profilePhone,
-            )
-          : null,
+      const normalizedVehicleType =
+        profileVehicleType || null
 
-        vehicle_type:
-          profileVehicleType || null,
+      const normalizedVehiclePlate =
+        profileVehiclePlate
+          .trim()
+          .toUpperCase() || null
 
-        vehicle_plate:
-          profileVehiclePlate
-            .trim()
-            .toUpperCase() || null,
-      }
-
+      // RPC em vez de escrever direto em `drivers`: `driver.id` só é um
+      // drivers.id para o entregador legado (driver_accounts -> drivers) —
+      // para o entregador regional/externo é um driver_profiles.id, e
+      // `drivers` nunca teve policy de UPDATE para o próprio entregador de
+      // qualquer forma. A RPC resolve a identidade certa dos dois lados.
       const { data, error } =
-        await supabase
-          .from('drivers')
-          .update(payload)
-          .eq('id', driver.id)
-          .select(
-            'id, name, phone, vehicle_type, vehicle_plate, is_active, organization_id',
-          )
-          .maybeSingle()
+        await supabase.rpc('update_my_driver_profile', {
+          _name: normalizedName,
+          _phone: normalizedPhone,
+          _vehicle_type: normalizedVehicleType,
+          _vehicle_plate: normalizedVehiclePlate,
+        })
 
       if (error) {
         throw error
       }
 
-      if (!data) {
+      const row = Array.isArray(data) ? data[0] : data
+
+      if (!row) {
         throw new Error(
-          'Seu perfil não pôde ser atualizado. A permissão de edição ainda não está disponível para esta conta.',
+          'Seu perfil não pôde ser atualizado.',
         )
       }
 
       const updatedDriver =
-        data as Driver
+        row as Driver
 
       setDriver(updatedDriver)
 
@@ -1262,18 +1240,30 @@ function App() {
       setProfileMessage(
         'Perfil atualizado. As alterações também ficam disponíveis para o restaurante.',
       )
+      showProfileMessage()
+      flashProfileSaved()
     } catch (error) {
       captureError(error, { event: 'profile.save_failed' })
 
-      const message =
+      // Erros técnicos do PostgREST (função/coluna fora do schema cache, etc.)
+      // não dizem nada ao entregador — o detalhe vai para o Sentry acima.
+      const technical =
         error &&
         typeof error === 'object' &&
-        'message' in error
+        'code' in error &&
+        /^(PGRST|42883|42703)/.test(String(error.code))
+
+      const message = technical
+        ? 'Não foi possível salvar agora. Tente novamente mais tarde.'
+        : error &&
+            typeof error === 'object' &&
+            'message' in error
           ? String(error.message)
           : 'Não foi possível atualizar seu perfil.'
 
       setProfileError(message)
     } finally {
+      profileSavingRef.current = false
       setProfileSaving(false)
     }
   }
@@ -1570,10 +1560,25 @@ function App() {
         'Iniciando trabalho...',
       )
 
+      // BUG 3: a native POST (doesn't depend on the WebView staying
+      // responsive) alongside the JS callback below — best-effort: if
+      // issuing the token fails, tracking still starts with JS-only
+      // delivery, exactly the previous behavior, rather than blocking
+      // "Iniciar trabalho" over this.
+      let locationIngestUrl: string | undefined
+      let locationIngestHeaders: Record<string, string> | undefined
+      try {
+        const { token } = await issueMyDriverLocationToken()
+        locationIngestUrl = `${supabaseUrl}/functions/v1/driver-location-ingest`
+        locationIngestHeaders = { Authorization: `Bearer ${token}` }
+      } catch (error) {
+        captureError(error, { event: 'gps.location_token_issue_failed' })
+      }
+
       await BackgroundGeolocation.start(
         {
           backgroundTitle:
-            'RotazRO Entregador',
+            'RotazRO',
 
           backgroundMessage:
             'Sua localização está ativa enquanto você realiza entregas.',
@@ -1584,6 +1589,18 @@ function App() {
 
           minIntervalMs:
             LOCATION_SYNC_INTERVAL_MS,
+
+          // BUG 3 root cause: the watcher only ever requested GPS_PROVIDER
+          // (raw Android location, not FusedLocationProviderClient) and the
+          // plugin's own code skips requesting NETWORK_PROVIDER as a
+          // fallback unless this is set — confirmed on a real device: GPS
+          // produced exactly one fix, then went silent indefinitely, with
+          // no recovery path. Emulators (BlueStacks) never hit this since
+          // their location is injected, not read from real GPS hardware.
+          networkFallback: true,
+
+          url: locationIngestUrl,
+          headers: locationIngestHeaders,
         },
 
         (position, error) => {
@@ -1691,6 +1708,12 @@ function App() {
         Capacitor.isNativePlatform()
       ) {
         await BackgroundGeolocation.stop()
+        // BUG 3: defense in depth alongside stopping the native service
+        // itself — revokes the location token so it can't keep working
+        // even if something kept POSTing after this. Never blocks
+        // encerrar trabalho (see revokeMyDriverLocationToken's own
+        // comment).
+        void revokeMyDriverLocationToken()
       }
 
       backgroundTrackingStarted.current =
@@ -1811,7 +1834,7 @@ function App() {
     )
 
     setLastSyncedAt(null)
-    setTemperature(null)
+    setWeather(null)
 
     lastLocationAttemptAt.current = 0
 
@@ -1825,6 +1848,13 @@ function App() {
   function navigate(
     nextView: AppView,
   ) {
+    // BUG 8: sair de "Meu perfil" esconde a confirmação na hora, em vez de
+    // deixá-la pendurada até o timer de 10s (ou reaparecer se o entregador
+    // voltar depois para essa tela).
+    if (view === 'profile' && nextView !== 'profile') {
+      hideProfileMessage()
+    }
+
     setView(nextView)
     setMenuOpen(false)
 
@@ -1832,9 +1862,7 @@ function App() {
       nextView === 'history' &&
       driver
     ) {
-      void loadHistory(
-        driver.id,
-      )
+      void loadHistory()
     }
   }
 
@@ -1850,9 +1878,9 @@ function App() {
         onDone={() => {
           setAuthConfirmLink(null)
           void loadDriver()
-            .then((loadedDriver) => {
+            .then(() => {
               setAuthenticated(true)
-              void loadHistory(loadedDriver.id)
+              void loadHistory()
             })
             .catch(() => {
               // Sem sessão de verdade (ex.: link já expirado e a pessoa só
@@ -1884,9 +1912,9 @@ function App() {
         onSignedUp={() => {
           setAuthMode('login')
           void (async () => {
-            const loadedDriver = await loadDriver()
+            await loadDriver()
             setAuthenticated(true)
-            void loadHistory(loadedDriver.id)
+            void loadHistory()
           })()
         }}
         onCancel={() => setAuthMode('login')}
@@ -1951,6 +1979,7 @@ function App() {
             <button
               type="submit"
               disabled={loginLoading}
+              aria-busy={loginLoading}
             >
               {loginLoading
                 ? 'Entrando...'
@@ -1969,6 +1998,7 @@ function App() {
             </button>
           </p>
         </section>
+        <AppVersionLabel />
       </main>
     )
   }
@@ -2008,7 +2038,23 @@ function App() {
           menuOpen ? 'open' : ''
         }`}
       >
-        <div className="drawer-profile">
+        <button
+          type="button"
+          className={`drawer-profile ${
+            view === 'profile'
+              ? 'active'
+              : ''
+          }`}
+          aria-label="Abrir meu perfil"
+          aria-current={
+            view === 'profile'
+              ? 'page'
+              : undefined
+          }
+          onClick={() =>
+            navigate('profile')
+          }
+        >
           <div className="drawer-avatar">
             {driver.name
               .trim()
@@ -2016,7 +2062,7 @@ function App() {
               .toUpperCase()}
           </div>
 
-          <div>
+          <div className="drawer-profile-text">
             <strong>
               {driver.name}
             </strong>
@@ -2030,7 +2076,14 @@ function App() {
                 : ''}
             </span>
           </div>
-        </div>
+
+          <ChevronRight
+            className="drawer-profile-chevron"
+            size={18}
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
+        </button>
 
         <nav className="drawer-nav">
           <button
@@ -2051,31 +2104,16 @@ function App() {
           <button
             type="button"
             className={
-              view === 'profile'
+              view === 'route'
                 ? 'active'
                 : ''
             }
             onClick={() =>
-              navigate('profile')
+              navigate('route')
             }
           >
-            <CircleUser className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
-            Meu perfil
-          </button>
-
-          <button
-            type="button"
-            className={
-              view === 'history'
-                ? 'active'
-                : ''
-            }
-            onClick={() =>
-              navigate('history')
-            }
-          >
-            <History className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
-            Histórico
+            <RouteIcon className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
+            Minha rota
           </button>
 
           <button
@@ -2096,16 +2134,16 @@ function App() {
           <button
             type="button"
             className={
-              view === 'route'
+              view === 'history'
                 ? 'active'
                 : ''
             }
             onClick={() =>
-              navigate('route')
+              navigate('history')
             }
           >
-            <RouteIcon className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
-            Minha rota
+            <History className="drawer-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
+            Histórico
           </button>
         </nav>
 
@@ -2183,6 +2221,15 @@ function App() {
   // INÍCIO
   // =========================================================
 
+  // Clima "fresco" o bastante pra confiar (WEATHER_STALE_MS) — currentDateTime
+  // reavalia isso a cada 30s (o próprio relógio da Home), então um clima que
+  // envelhece some da tela sozinho, sem precisar de outro timer.
+  const freshWeather = freshWeatherReading(weather, currentDateTime.getTime())
+
+  const WeatherIcon = freshWeather
+    ? weatherIcon(freshWeather.weatherCode, freshWeather.isDay)
+    : null
+
   const homeView = (
     <>
       <section className="home-hero">
@@ -2203,25 +2250,25 @@ function App() {
         <div className="home-hero-meta">
           <div className="home-datetime">
             <span className="home-datetime-weather">
-              {temperature != null ? `${Math.round(temperature)}°C` : weatherLoading ? '...' : '—'} ☀
+              {freshWeather ? (
+                <>
+                  {`${Math.round(freshWeather.temperature)}°C`}
+                  {WeatherIcon && (
+                    <WeatherIcon
+                      className="home-weather-icon"
+                      aria-hidden="true"
+                    />
+                  )}
+                </>
+              ) : weatherLoading ? (
+                '...'
+              ) : (
+                '—'
+              )}
             </span>
             <span className="home-datetime-date">
               {formatShortDate(currentDateTime)} • {formatClock(currentDateTime)}
             </span>
-          </div>
-
-          <div
-            className={`work-badge ${
-              tracking
-                ? 'online'
-                : ''
-            }`}
-          >
-            <span />
-
-            {tracking
-              ? 'Em trabalho'
-              : 'Fora de expediente'}
           </div>
         </div>
       </section>
@@ -2315,14 +2362,6 @@ function App() {
           </div>
         </div>
 
-        <div className="updated">
-          Última leitura:{' '}
-          {formatTime(
-            location?.timestamp ??
-              null,
-          )}
-        </div>
-
         <div className="sync-info">
           <strong>
             {syncStatus}
@@ -2349,6 +2388,7 @@ function App() {
               void startGps()
             }}
             disabled={gpsBusy}
+            aria-busy={gpsBusy}
           >
             {gpsBusy
               ? 'Iniciando...'
@@ -2392,6 +2432,7 @@ function App() {
               })()
             }}
             disabled={gpsBusy || activeRouteCheckBusy}
+            aria-busy={gpsBusy || activeRouteCheckBusy}
           >
             {gpsBusy
               ? 'Encerrando...'
@@ -2524,7 +2565,7 @@ function App() {
         </p>
       </section>
 
-      {profileMessage && (
+      {profileMessage && profileMessageVisible && (
         <div className="success-message">
           {profileMessage}
         </div>
@@ -2540,6 +2581,12 @@ function App() {
         className="profile-form"
         onSubmit={saveProfile}
       >
+        <section className="profile-section">
+        <h2 className="profile-section-title">
+          Dados pessoais
+        </h2>
+
+        <div className="profile-card">
         <label>
           Nome completo
 
@@ -2618,6 +2665,15 @@ function App() {
           />
         </label>
 
+        </div>
+        </section>
+
+        <section className="profile-section">
+        <h2 className="profile-section-title">
+          Veículo
+        </h2>
+
+        <div className="profile-card">
         <label>
           Tipo de veículo
 
@@ -2679,18 +2735,35 @@ function App() {
             autoCapitalize="characters"
           />
         </label>
+        </div>
+        </section>
 
         <button
           type="submit"
           disabled={profileSaving}
+          aria-busy={profileSaving}
+          className={
+            profileSaved && !profileSaving
+              ? 'is-success'
+              : undefined
+          }
         >
           {profileSaving
             ? 'Salvando...'
-            : 'Salvar alterações'}
+            : profileSaved
+              ? 'Salvo ✓'
+              : 'Salvar alterações'}
         </button>
       </form>
 
-      <section className="profile-status-card">
+      <ThemeSelector />
+
+      <section className="profile-section">
+        <h2 className="profile-section-title">
+          Status
+        </h2>
+
+      <div className="profile-status-card">
         <span
           className={`profile-status-icon ${
             tracking
@@ -2712,9 +2785,8 @@ function App() {
               : 'Sua localização não está sendo compartilhada.'}
           </p>
         </div>
+      </div>
       </section>
-
-      <ThemeSelector />
     </>
   )
 
@@ -3149,6 +3221,12 @@ function App() {
       <section className="app-container">
         {header}
 
+        {offerExpiredNoticeVisible && (
+          <div className="error" role="status">
+            Essa oferta não está mais disponível. Ela pode ter expirado ou sido atendida por outro entregador.
+          </div>
+        )}
+
         <div className="app-content">
           {view === 'home' &&
             homeView}
@@ -3159,7 +3237,21 @@ function App() {
           {view === 'history' &&
             historyView}
 
-          {view === 'route' && <MyRouteScreen onFinished={() => navigate('home')} />}
+          {view === 'route' && (
+            <MyRouteScreen
+              onFinished={() => {
+                // BUG 4: "Seu desempenho" na Home é derivado de `history`, que só
+                // era recarregado ao entrar em "Meu histórico" -- sem isso, os
+                // números ficavam presos no estado anterior à rota recém-concluída
+                // até o entregador visitar aquela tela manualmente.
+                void loadHistory()
+                navigate('home')
+              }}
+              registerBackHandler={(handler) => {
+                myRouteBackHandlerRef.current = handler
+              }}
+            />
+          )}
 
           {view === 'restaurants' &&
             (driverProfileId ? (

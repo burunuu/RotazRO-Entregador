@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { fetchMyRestaurants, type MyRestaurantLink } from '../services/driver-identity'
+import { fetchMyRestaurants, respondToDriverInvite, type MyRestaurantLink } from '../services/driver-identity'
 import { captureError } from '../lib/observability/capture'
 
 type MyRestaurantsScreenProps = {
@@ -10,6 +10,17 @@ type MyRestaurantsScreenProps = {
 export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProps) {
   const [restaurants, setRestaurants] = useState<MyRestaurantLink[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Convite em resposta no momento — trava os dois botões desse card
+  // específico (não a tela inteira) contra duplo toque. Guarda também QUAL
+  // ação (aceitar/recusar) para o botão certo mostrar "-ando..." (os dois
+  // antes só comparavam organization_id, então recusar fazia o botão
+  // "Aceitar" mostrar "Aceitando..." por engano).
+  const [respondingAction, setRespondingAction] = useState<{
+    organizationId: string
+    accept: boolean
+  } | null>(null)
+  const respondingTo = respondingAction?.organizationId ?? null
+  const [respondError, setRespondError] = useState<string | null>(null)
 
   async function load() {
     try {
@@ -61,39 +72,112 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
     }
   }, [driverProfileId])
 
+  async function respond(organizationId: string, accept: boolean) {
+    if (respondingTo) return
+
+    try {
+      setRespondingAction({ organizationId, accept })
+      setRespondError(null)
+      await respondToDriverInvite(organizationId, accept)
+      // O Realtime acima também refaz o load, mas refazer aqui evita a
+      // pessoa ver o card de convite parado por até 300ms depois de tocar.
+      await load()
+    } catch (err) {
+      captureError(err, { event: 'driver.respond_to_invite_failed' })
+      setRespondError(
+        err instanceof Error ? err.message : 'Não foi possível responder ao convite.',
+      )
+    } finally {
+      setRespondingAction(null)
+    }
+  }
+
+  const pendingInvites = (restaurants ?? []).filter((r) => r.status === 'pending')
   const activeRestaurants = (restaurants ?? []).filter((r) => r.status === 'active')
+  const loaded = restaurants !== null
+  const nothingAtAll = loaded && pendingInvites.length === 0 && activeRestaurants.length === 0
 
   return (
     <div className="my-restaurants-screen">
       <section className="page-title">
         <p className="eyebrow">SEUS VÍNCULOS</p>
         <h1>Meus restaurantes</h1>
-        <p>Restaurantes que já vincularam você como entregador.</p>
+        <p>Restaurantes vinculados a você e convites aguardando sua decisão.</p>
       </section>
 
       {error && <div className="error">{error}</div>}
+      {respondError && <div className="error">{respondError}</div>}
 
-      {restaurants === null && !error ? (
+      {!loaded && !error ? (
         <p className="description">Carregando...</p>
-      ) : activeRestaurants.length === 0 ? (
-        <section className="card">
-          <p>
-            <strong>Nenhum restaurante vinculado ainda.</strong>
-          </p>
-          <p className="description">
-            Você pode trabalhar como entregador independente e receber vínculos posteriormente.
-            Quando um restaurante te adicionar pelo seu e-mail de cadastro, ele aparece aqui
-            automaticamente.
-          </p>
-        </section>
       ) : (
-        <ul className="restaurant-list">
-          {activeRestaurants.map((r) => (
-            <li key={r.organization_id} className="card restaurant-list-item">
-              <strong>{r.organization_name}</strong>
-            </li>
-          ))}
-        </ul>
+        <>
+          {pendingInvites.length > 0 && (
+            <section className="restaurant-section">
+              <h2 className="restaurant-section-title">Convites pendentes</h2>
+              <ul className="restaurant-list">
+                {pendingInvites.map((r) => (
+                  <li key={r.organization_id} className="card restaurant-invite-item">
+                    <strong>{r.organization_name}</strong>
+                    <p className="description">Quer vincular você como entregador.</p>
+                    <div className="restaurant-invite-actions">
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={respondingTo === r.organization_id}
+                        aria-busy={respondingTo === r.organization_id}
+                        onClick={() => void respond(r.organization_id, false)}
+                      >
+                        {respondingAction?.organizationId === r.organization_id &&
+                        !respondingAction.accept
+                          ? 'Recusando...'
+                          : 'Recusar'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={respondingTo === r.organization_id}
+                        aria-busy={respondingTo === r.organization_id}
+                        onClick={() => void respond(r.organization_id, true)}
+                      >
+                        {respondingAction?.organizationId === r.organization_id &&
+                        respondingAction.accept
+                          ? 'Aceitando...'
+                          : 'Aceitar'}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {activeRestaurants.length > 0 && (
+            <section className="restaurant-section">
+              <h2 className="restaurant-section-title">Meus restaurantes</h2>
+              <ul className="restaurant-list">
+                {activeRestaurants.map((r) => (
+                  <li key={r.organization_id} className="card restaurant-list-item">
+                    <strong>{r.organization_name}</strong>
+                    <span className="restaurant-linked-tag">Vinculado</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {nothingAtAll && (
+            <section className="card empty-state">
+              <p className="empty-state-title">
+                <strong>Nenhum restaurante vinculado ainda.</strong>
+              </p>
+              <p className="description">
+                Você pode trabalhar como entregador independente enquanto isso — sua conta
+                continua funcionando normalmente. Quando um restaurante te adicionar pelo seu
+                e-mail de cadastro, o convite aparece aqui para você aceitar ou recusar.
+              </p>
+            </section>
+          )}
+        </>
       )}
     </div>
   )

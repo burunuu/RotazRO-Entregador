@@ -1,5 +1,9 @@
 apply plugin: 'com.android.application'
 
+// Fonte única da versão: package.json (o mesmo valor que a UI mostra).
+// Só o versionCode fica aqui — inteiro que sempre cresce.
+def appPackage = new groovy.json.JsonSlurper().parse(file('../../package.json'))
+
 android {
     namespace = "com.rotazro.entregador"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +11,8 @@ android {
         applicationId "com.rotazro.entregador"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "0.1.0"
+        versionCode 9
+        versionName appPackage.version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -98,3 +98,24 @@ export async function declineOffer(offerId: string): Promise<void> {
   const { error } = await supabase.rpc('decline_delivery_offer', { _offer_id: offerId })
   if (error) throw error
 }
+
+/**
+ * `true` se ESTE entregador aceitou uma oferta para a rota — ou seja, a rota
+ * veio de uma oferta (fluxo regional/externo), não de uma atribuição direta
+ * do restaurante a um entregador da loja. É a fonte de verdade da origem:
+ * `accept_delivery_offer` grava a oferta como 'accepted' na mesma transação
+ * que atribui a rota. Não dá pra usar o vínculo com o restaurante: aceitar
+ * uma oferta cria o vínculo ATIVO, então um externo passa a ser "vinculado"
+ * logo após aceitar. RLS ("driver reads own offers") limita a consulta às
+ * ofertas do próprio entregador.
+ */
+export async function wasRouteAcceptedViaOffer(routeId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('delivery_offers')
+    .select('id')
+    .eq('route_id', routeId)
+    .eq('status', 'accepted')
+    .limit(1)
+  if (error) throw error
+  return (data?.length ?? 0) > 0
+}

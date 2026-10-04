@@ -34,6 +34,14 @@ type FinishedRecap = {
 type MyRouteScreenProps = {
   /** Chamado ao sair da tela de resumo pós-finalização (manual ou automático). */
   onFinished: () => void
+  /**
+   * Registra com o App.tsx uma função que o botão Back físico chama ANTES
+   * de sair de "Minha rota": se houver um sub-modal aberto aqui (hoje só o
+   * OccurrenceSheet), ela o fecha e retorna true (Back não navega mais);
+   * sem nada aberto, retorna false e o App.tsx segue pra Home. `null` no
+   * cleanup evita que App.tsx chame uma função de uma instância desmontada.
+   */
+  registerBackHandler?: (handler: (() => boolean) | null) => void
 }
 
 /**
@@ -43,7 +51,7 @@ type MyRouteScreenProps = {
  * visual/funcional desta tela. Autorização aqui é pela identidade do
  * entregador (RLS via driver_owns_route), não por token.
  */
-export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
+export function MyRouteScreen({ onFinished, registerBackHandler }: MyRouteScreenProps) {
   const currentRoute = useCurrentRoute()
   const [occurrenceOpen, setOccurrenceOpen] = useState(false)
   const [finishedRecap, setFinishedRecap] = useState<FinishedRecap | null>(null)
@@ -52,6 +60,18 @@ export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
     void currentRoute.refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!registerBackHandler) return
+    registerBackHandler(() => {
+      if (occurrenceOpen) {
+        setOccurrenceOpen(false)
+        return true
+      }
+      return false
+    })
+    return () => registerBackHandler(null)
+  }, [registerBackHandler, occurrenceOpen])
 
   const route = currentRoute.route
 
@@ -183,6 +203,7 @@ export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
             type="button"
             className="button-accent"
             disabled={currentRoute.actionBusy}
+            aria-busy={currentRoute.actionBusy}
             onClick={() => void currentRoute.start(route.id)}
           >
             {currentRoute.actionBusy ? 'Iniciando...' : 'Iniciar rota'}
@@ -252,6 +273,7 @@ export function MyRouteScreen({ onFinished }: MyRouteScreenProps) {
             type="button"
             className="button-accent"
             disabled={currentRoute.actionBusy}
+            aria-busy={currentRoute.actionBusy}
             onClick={() => {
               // Snapshot antes de chamar complete(): assim que o status vira
               // completed, fetchMyActiveRoute() para de devolver esta rota

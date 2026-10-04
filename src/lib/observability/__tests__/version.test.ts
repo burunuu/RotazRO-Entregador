@@ -57,6 +57,6 @@ describe("appRelease", () => {
     // Not hardcoding the current version/versionCode — this just locks the
     // shape (rotazro-entregador@<versionName>+<versionCode>), which is what
     // this round explicitly changed away from a git-commit suffix.
-    expect(appRelease()).toMatch(/^rotazro-entregador@\d+\.\d+\.\d+\+\d+$/);
+    expect(appRelease()).toMatch(/^rotazro-entregador@\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?\+\d+$/);
   });
 });

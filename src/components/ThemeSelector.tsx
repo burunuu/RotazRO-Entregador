@@ -1,4 +1,5 @@
-import { useAppTheme, type AppTheme } from '../lib/theme'
+import type { AppTheme } from '../lib/theme'
+import { useAppTheme } from '../lib/theme-runtime'
 
 const OPTIONS: { value: AppTheme; label: string }[] = [
   { value: 'light', label: 'Claro' },
@@ -6,26 +7,42 @@ const OPTIONS: { value: AppTheme; label: string }[] = [
   { value: 'system', label: 'Sistema' },
 ]
 
-/** Três opções — "Sistema" é o padrão recomendado e acompanha o celular
- * ao vivo (ver src/lib/theme.ts). Usado na tela de perfil. */
+/** Seção "Preferências" do perfil. Três opções — "Sistema" é o padrão
+ * recomendado e acompanha o celular ao vivo (ver src/lib/theme.ts). A troca
+ * é aplicada na hora (não depende do "Salvar alterações" do formulário). */
 export function ThemeSelector() {
   const [theme, setTheme] = useAppTheme()
 
   return (
-    <section className="theme-selector">
-      <p className="eyebrow">APARÊNCIA</p>
-      <div className="theme-selector-options">
-        {OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={`theme-selector-option${theme === option.value ? ' active' : ''}`}
-            onClick={() => setTheme(option.value)}
-            aria-pressed={theme === option.value}
-          >
-            {option.label}
-          </button>
-        ))}
+    <section className="profile-section">
+      <h2 className="profile-section-title">Preferências</h2>
+
+      <div className="profile-card">
+        <div className="theme-selector-head">
+          <strong id="theme-selector-label">Aparência</strong>
+          <small className="field-help">
+            "Sistema" acompanha o modo claro ou escuro do seu celular.
+          </small>
+        </div>
+
+        <div
+          className="theme-selector-options"
+          role="radiogroup"
+          aria-labelledby="theme-selector-label"
+        >
+          {OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={theme === option.value}
+              className={`theme-selector-option${theme === option.value ? ' active' : ''}`}
+              onClick={() => setTheme(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
     </section>
   )

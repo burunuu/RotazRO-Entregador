@@ -257,7 +257,7 @@ export function SignUpScreen({ onSignedUp, onCancel }: SignUpScreenProps) {
             />
           </label>
 
-          <button type="submit" disabled={busy}>
+          <button type="submit" disabled={busy} aria-busy={busy}>
             {busy ? 'Criando conta...' : 'Criar conta'}
           </button>
         </form>

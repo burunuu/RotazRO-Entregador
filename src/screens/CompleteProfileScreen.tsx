@@ -105,7 +105,7 @@ export function CompleteProfileScreen({ onCompleted, onLogout }: CompleteProfile
             />
           </label>
 
-          <button type="submit" disabled={busy}>
+          <button type="submit" disabled={busy} aria-busy={busy}>
             {busy ? 'Salvando...' : 'Concluir cadastro'}
           </button>
         </form>
