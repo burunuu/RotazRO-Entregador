@@ -123,17 +123,6 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
                     <div className="restaurant-invite-actions">
                       <button
                         type="button"
-                        disabled={respondingTo === r.organization_id}
-                        aria-busy={respondingTo === r.organization_id}
-                        onClick={() => void respond(r.organization_id, true)}
-                      >
-                        {respondingAction?.organizationId === r.organization_id &&
-                        respondingAction.accept
-                          ? 'Aceitando...'
-                          : 'Aceitar'}
-                      </button>
-                      <button
-                        type="button"
                         className="secondary"
                         disabled={respondingTo === r.organization_id}
                         aria-busy={respondingTo === r.organization_id}
@@ -143,6 +132,17 @@ export function MyRestaurantsScreen({ driverProfileId }: MyRestaurantsScreenProp
                         !respondingAction.accept
                           ? 'Recusando...'
                           : 'Recusar'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={respondingTo === r.organization_id}
+                        aria-busy={respondingTo === r.organization_id}
+                        onClick={() => void respond(r.organization_id, true)}
+                      >
+                        {respondingAction?.organizationId === r.organization_id &&
+                        respondingAction.accept
+                          ? 'Aceitando...'
+                          : 'Aceitar'}
                       </button>
                     </div>
                   </li>

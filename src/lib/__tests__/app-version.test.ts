@@ -1,3 +1,5 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -8,16 +10,18 @@ import packageRaw from '../../../package.json?raw'
 import gradle from '../../../android/app/build.gradle?raw'
 import appSource from '../../App.tsx?raw'
 
+// CSS não passa por `?raw` no vitest (css desativado → string vazia); lê direto do disco.
+const appCss = readFileSync(new URL('../../App.css', import.meta.url), 'utf8').replaceAll('\r\n', '\n')
 const packageJson = JSON.parse(packageRaw) as { version: string }
 
 describe('versão do app', () => {
-  it('A) a versão atual é 1.0.0-beta', () => {
+  it('A) a versão atual é 1.0.1-beta', () => {
     // Quando subir de versão (1.0.1, 1.1.0, 1.0.0 sem beta...), atualize aqui junto com package.json.
-    expect(APP_VERSION).toBe('1.0.0-beta')
+    expect(APP_VERSION).toBe('1.0.1-beta')
   })
 
-  it('B) o display é "v1.0.0 (beta)"', () => {
-    expect(appDisplayVersion()).toBe('v1.0.0 (beta)')
+  it('B) o display é "v1.0.1 (beta)"', () => {
+    expect(appDisplayVersion()).toBe('v1.0.1 (beta)')
   })
 
   it('formata as variações previstas (patch, minor, sem beta, outros sufixos)', () => {
@@ -31,10 +35,10 @@ describe('versão do app', () => {
 })
 
 describe('tela de login', () => {
-  it('C/D) o rodapé renderiza "RotazRO • v1.0.0 (beta)" a partir da fonte central', () => {
+  it('C/D) o rodapé renderiza "RotazRO • v1.0.1 (beta)" a partir da fonte central', () => {
     const html = renderToStaticMarkup(createElement(AppVersionLabel)).replace(/<!-- -->/g, '')
     expect(html).toContain('class="app-version"')
-    expect(html).toContain('RotazRO • v1.0.0 (beta)')
+    expect(html).toContain('RotazRO • v1.0.1 (beta)')
     expect(html).toContain(`RotazRO • ${formatDisplayVersion(appPackageVersion())}`)
   })
 
@@ -56,9 +60,32 @@ describe('coerência entre versão exibida, package.json e Android', () => {
     expect(gradle).not.toMatch(/versionName\s+["']/)
   })
 
-  it('E) o versionCode é inteiro e está em 8 ou mais (nunca diminui)', () => {
+  it('E) o versionCode é inteiro e está em 9 ou mais (nunca diminui)', () => {
     const code = Number(/versionCode\s+(\d+)/.exec(gradle)?.[1])
     expect(Number.isInteger(code)).toBe(true)
-    expect(code).toBeGreaterThanOrEqual(8)
+    expect(code).toBeGreaterThanOrEqual(9)
+  })
+})
+
+describe('posição da versão no login (card não é afetado)', () => {
+  const block = (selector: string) => {
+    const start = appCss.indexOf(`${selector} {`)
+    return appCss.slice(start, appCss.indexOf('}', start))
+  }
+
+  it('D/E) a versão fica fora do fluxo: fixa no canto inferior direito, com safe-area', () => {
+    const css = block('.app-version')
+    expect(css).toMatch(/position:\s*fixed/)
+    expect(css).toMatch(/right:[^;]*safe-area-inset-right/)
+    expect(css).toMatch(/bottom:[^;]*safe-area-inset-bottom/)
+    expect(css).toMatch(/pointer-events:\s*none/)
+  })
+
+  it('E) o layout que centraliza o card segue o mesmo, com o card como único filho em fluxo', () => {
+    const login = block('.app:not(.app-shell)')
+    expect(login).toMatch(/display:\s*flex/)
+    expect(login).toMatch(/align-items:\s*center/)
+    expect(login).toMatch(/justify-content:\s*center/)
+    expect(block('.login-card')).toMatch(/max-width:\s*480px/)
   })
 })

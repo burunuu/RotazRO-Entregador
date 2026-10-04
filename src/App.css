@@ -1471,13 +1471,24 @@ button.secondary:hover:not(:disabled) {
   background: var(--btn-bg);
 }
 
+/* Identificação da versão: fora do fluxo (o `.app` do login é um flex que
+   centraliza o card — um segundo filho disputaria espaço com ele). Fixa no
+   canto inferior direito, acima da barra de navegação do Android. */
 .app-version {
-  margin: 16px 0 24px;
-  text-align: center;
-  font-size: 12px;
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right), var(--safe-area-inset-right, 0px));
+  bottom: max(12px, env(safe-area-inset-bottom), var(--safe-area-inset-bottom, 0px));
+  margin: 0;
+  max-width: calc(100vw - 28px);
+  font-size: 11px;
   line-height: 1.2;
   letter-spacing: 0.02em;
+  text-align: right;
+  white-space: nowrap;
   color: var(--text-muted);
+  opacity: 0.85;
+  pointer-events: none;
+  user-select: none;
 }
 
 .login-signup-prompt {
