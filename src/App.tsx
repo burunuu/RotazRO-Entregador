@@ -8,6 +8,7 @@ import { supabase, supabaseUrl } from './lib/supabase'
 import { ensureDriverProfile } from './services/driver-identity'
 import { updateMyPresence } from './services/presence'
 import { issueMyDriverLocationToken, revokeMyDriverLocationToken } from './services/location-token'
+import { ensureAuthenticatedSession, SessionExpiredError } from './lib/session-guard-runtime'
 import { registerForPush, onNotificationOpened, unregisterPush } from './services/notifications'
 import { useDeliveryOffers } from './hooks/useDeliveryOffers'
 import { useAssignedRoute } from './hooks/useAssignedRoute'
@@ -364,7 +365,7 @@ function App() {
   // este hook fica desabilitado, a oferta nunca é buscada -- parece "abriu
   // e fechou". A busca em si é leve (poll de 5s + realtime); não depende de
   // tracking estar true.
-  const deliveryOffers = useDeliveryOffers(authenticated)
+  const deliveryOffers = useDeliveryOffers(authenticated, () => void handleSessionExpired())
 
   // Detecção de rota atribuída diretamente pelo restaurante ("entregador
   // da loja") ou já aceita via oferta regional — independente de
@@ -496,6 +497,10 @@ function App() {
   // "online" DEPOIS de encerrar o trabalho (deixaria coordenadas velhas no Admin).
   const workActive = useRef(false)
   const locationSyncPromise = useRef<Promise<void> | null>(null)
+  // Evita rodar handleSessionExpired() mais de uma vez em paralelo — GPS,
+  // polling de ofertas e emissão de token podem detectar a sessão expirada
+  // quase ao mesmo tempo. Resetado no próximo login bem-sucedido.
+  const sessionExpiredHandling = useRef(false)
   // Offline + clear em andamento; o logout espera antes do signOut (sem sessão as RPCs falham).
   const offlineCleanup = useRef<Promise<void> | null>(null)
 
@@ -1073,6 +1078,7 @@ function App() {
 
           if (mounted) {
             setAuthenticated(true)
+            sessionExpiredHandling.current = false
 
             void loadHistory()
           }
@@ -1105,6 +1111,58 @@ function App() {
     }
   }, [])
 
+  /**
+   * Reação central a SessionExpiredError (ver session-guard.ts): nenhuma
+   * chamada autenticada deve seguir em frente como `anon` depois de uma
+   * sessão expirada sem refresh válido. Para GPS, polling de ofertas e
+   * emissão de token de localização — qualquer um pode detectar isso
+   * primeiro, por isso o dedup via sessionExpiredHandling. Diferente de
+   * handleLogout(): aqui a sessão já está morta, então pula as RPCs de
+   * cleanup que dependem dela (offline/clear location) — só o essencial:
+   * parar o rastreamento local, limpar a sessão local e levar de volta pra
+   * tela de login com um erro claro, em vez do 42501 genérico repetido.
+   */
+  async function handleSessionExpired() {
+    if (sessionExpiredHandling.current) return
+    sessionExpiredHandling.current = true
+
+    logger.warn('session.expired_handled', {})
+
+    workActive.current = false
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await BackgroundGeolocation.stop()
+      } catch (error) {
+        captureError(error, { event: 'gps.stop_on_session_expired_failed' })
+      }
+      void revokeMyDriverLocationToken()
+    }
+
+    backgroundTrackingStarted.current = false
+    setTracking(false)
+
+    // scope: 'local' — não depende de rede nem de sessão válida, só limpa o
+    // storage local para o estado ficar coerente com "desautenticado".
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+
+    setAuthenticated(false)
+    setDriver(null)
+    setDriverProfileId(null)
+    setProfileIncomplete(false)
+    setLocation(null)
+
+    setView('home')
+    setMenuOpen(false)
+
+    setGpsStatus('Fora de expediente')
+    setGpsError(null)
+    setSyncStatus('Sessão expirada')
+    setSyncError(null)
+
+    setAuthError('Sua sessão expirou. Faça login novamente para continuar.')
+  }
+
   // =========================================================
   // LOGIN
   // =========================================================
@@ -1131,6 +1189,7 @@ function App() {
       await loadDriver()
 
       setAuthenticated(true)
+      sessionExpiredHandling.current = false
       setPassword('')
 
       void loadHistory()
@@ -1301,6 +1360,11 @@ function App() {
         'Enviando localização...',
       )
 
+      // Nunca chama a RPC como `anon`: garante sessão fresca antes — se
+      // expirada e sem refresh válido, lança SessionExpiredError (tratado
+      // no catch abaixo) em vez de bater em update_my_driver_location.
+      await ensureAuthenticatedSession()
+
       const latitude =
         position.coords.latitude
 
@@ -1399,6 +1463,14 @@ function App() {
         'Localização sincronizada',
       )
     } catch (error) {
+      // Sessão morta: não é um erro de GPS/rede comum (não loga 42501 a
+      // cada ciclo), e a reação correta é levar o app de volta pra
+      // reautenticação, não continuar tentando enviar como `anon`.
+      if (error instanceof SessionExpiredError) {
+        void handleSessionExpired()
+        return
+      }
+
       const message =
         error &&
         typeof error === 'object' &&
@@ -1880,6 +1952,7 @@ function App() {
           void loadDriver()
             .then(() => {
               setAuthenticated(true)
+              sessionExpiredHandling.current = false
               void loadHistory()
             })
             .catch(() => {
@@ -1914,6 +1987,7 @@ function App() {
           void (async () => {
             await loadDriver()
             setAuthenticated(true)
+            sessionExpiredHandling.current = false
             void loadHistory()
           })()
         }}

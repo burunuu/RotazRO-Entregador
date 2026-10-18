@@ -4,6 +4,7 @@ import { acceptOffer, declineOffer, fetchPendingOffer, type PendingOffer } from 
 import { describeError } from '../services/error-helpers'
 import { captureError } from '../lib/observability/capture'
 import { logger } from '../lib/observability/logger'
+import { SessionExpiredError } from '../lib/session-guard-runtime'
 
 /**
  * Realtime é o caminho principal pra notar uma oferta nova (a loja clica
@@ -21,7 +22,12 @@ import { logger } from '../lib/observability/logger'
 const POLL_MS = 5000
 const REALTIME_DEBOUNCE_MS = 250
 
-export function useDeliveryOffers(enabled: boolean) {
+/** `onSessionExpired` — chamado (no máximo uma vez por sessão morta; quem
+ * implementa já faz o próprio dedup, ver App.tsx) quando o polling detecta
+ * SessionExpiredError, em vez do captureError normal: evita spam no Sentry
+ * a cada 5s e deixa a reação central (parar GPS, voltar pro login) correr
+ * uma única vez, não importa qual chamador (GPS ou ofertas) notou primeiro. */
+export function useDeliveryOffers(enabled: boolean, onSessionExpired?: () => void) {
   const [offer, setOffer] = useState<PendingOffer | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -30,6 +36,13 @@ export function useDeliveryOffers(enabled: boolean) {
   // imediata em vez de esperar o próximo tick do polling de 5s.
   const pollNow = useRef<() => Promise<boolean>>(() => Promise.resolve(false))
   const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Ref em vez de dependência do effect abaixo: App.tsx re-renderiza com
+  // frequência (GPS) e handleSessionExpired não é memoizada — colocá-la nas
+  // deps reiniciaria o polling/subscription a cada render sem necessidade.
+  const onSessionExpiredRef = useRef(onSessionExpired)
+  useEffect(() => {
+    onSessionExpiredRef.current = onSessionExpired
+  }, [onSessionExpired])
 
   useEffect(() => {
     if (!enabled) {
@@ -55,7 +68,11 @@ export function useDeliveryOffers(enabled: boolean) {
         return next !== null
       } catch (err) {
         if (!cancelled) {
-          captureError(err, { event: 'dispatch.fetch_offer_failed' })
+          if (err instanceof SessionExpiredError) {
+            onSessionExpiredRef.current?.()
+          } else {
+            captureError(err, { event: 'dispatch.fetch_offer_failed' })
+          }
         }
         return false
       }

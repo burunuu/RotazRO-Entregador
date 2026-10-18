@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { captureError } from '../lib/observability/capture'
+import { ensureAuthenticatedSession } from '../lib/session-guard-runtime'
 
 /**
  * BUG 3: a long-lived, write-only, single-driver token for
@@ -21,6 +22,13 @@ export interface DriverLocationToken {
  * app open -- rotates the driver's token (the previous one is revoked
  * server-side as part of issuing a new one, one open token per driver). */
 export async function issueMyDriverLocationToken(): Promise<DriverLocationToken> {
+  // Garante sessão fresca antes de emitir — sem isso, uma sessão expirada
+  // sem refresh bem-sucedido deixaria o token nativo de background nascer
+  // de uma chamada que já teria falhado como `anon`. Se expirada e sem
+  // refresh válido, lança SessionExpiredError (ver session-guard.ts) — o
+  // chamador (App.tsx) já trata essa falha como best-effort.
+  await ensureAuthenticatedSession()
+
   const { data, error } = await supabase.rpc('issue_my_driver_location_token')
   if (error) throw error
   const row = Array.isArray(data) ? data[0] : data
