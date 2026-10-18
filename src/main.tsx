@@ -8,9 +8,15 @@ import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { captureError } from './lib/observability/capture'
 import { initTheme } from './lib/theme-runtime'
+import { startSessionLifecycle } from './lib/session-guard-runtime'
 
 // Tema (Claro/Escuro/Sistema) aplicado no boot, independente de qualquer tela.
 initTheme()
+
+// Reforça autoRefreshToken conforme o app entra/sai de primeiro plano — ver
+// session-guard-runtime.ts para o porquê (timer interno do supabase-js não
+// é confiável sozinho em WebView Capacitor).
+startSessionLifecycle()
 
 // Sentry's own GlobalHandlers integration already listens for
 // window.onerror/unhandledrejection when Sentry is configured — these

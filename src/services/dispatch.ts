@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { ensureAuthenticatedSession } from '../lib/session-guard-runtime'
 
 export type OfferStatus = 'pending' | 'accepted' | 'declined' | 'expired' | 'cancelled'
 
@@ -27,6 +28,10 @@ export type PendingOffer = {
  * oferta do próprio entregador é visível.
  */
 export async function fetchPendingOffer(): Promise<PendingOffer | null> {
+  // Nunca consulta como `anon`: sessão expirada aqui lança
+  // SessionExpiredError em vez de seguir em frente — ver session-guard.ts.
+  await ensureAuthenticatedSession()
+
   const { data: offer, error } = await supabase
     .from('delivery_offers')
     .select('id, route_id, status, distance_to_pickup_m, eta_to_pickup_s, expires_at, offered_at')
